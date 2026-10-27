@@ -14,7 +14,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException
 
-from backend.core.models import RunState, StartRun
+from backend.core.models import Error, RunState, StartRun
 from backend.core.report import render_html, report_data
 from backend.core.runs import RunError, RunStore
 
@@ -36,15 +36,23 @@ def docker_available() -> bool:
 
 
 def create_app(root: Path = ROOT, step_seconds: float = 0.2) -> FastAPI:
-    store = RunStore(root, step_seconds)
     settings = {**dotenv_values(root / ".env"), **os.environ}
     mode = settings.get("LLM_MODE", "mock").lower()
     if mode not in {"live", "mock", "replay"}:
         raise ValueError("LLM_MODE must be live, mock, or replay.")
+    pipeline = settings.get("PROOFPORT_PIPELINE", "verify")
+    if pipeline not in {"verify", "simulation"}:
+        raise ValueError("PROOFPORT_PIPELINE must be verify or simulation.")
+    store = RunStore(root, step_seconds, pipeline=pipeline)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.docker = docker_available()
+        if not app.state.docker:
+            store.verification_error = Error(
+                code="docker_unavailable",
+                message="Docker is unavailable. Only static source inventory and hashing ran; dynamic verification is unavailable. Host execution is forbidden.",
+            )
         try:
             yield
         finally:
@@ -72,6 +80,8 @@ def create_app(root: Path = ROOT, step_seconds: float = 0.2) -> FastAPI:
 
     @app.post("/api/runs")
     async def start_run(body: StartRun):
+        if pipeline == "simulation" and mode != "mock":
+            raise RunError(503, "pipeline_unavailable", "Simulation requires LLM_MODE=mock and cannot stand in for live or replay verification.")
         return {"run_id": store.start(body.source_path, body.max_iterations)}
 
     @app.get("/api/runs/{run_id}", response_model=RunState, response_model_exclude_unset=True)
@@ -100,7 +110,7 @@ def create_app(root: Path = ROOT, step_seconds: float = 0.2) -> FastAPI:
     else:
         @app.get("/", response_class=HTMLResponse)
         async def index():
-            return '<h1>Proofport backend is running</h1><p>Simulated pipeline. Frontend files have not been added yet.</p><a href="/docs">API documentation</a>'
+            return '<h1>Proofport backend is running</h1><p>Real migration verification is not implemented. Static inventory and explicit demo simulation are available. Frontend files have not been added yet.</p><a href="/docs">API documentation</a>'
 
     return app
 

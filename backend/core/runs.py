@@ -45,14 +45,19 @@ class Run:
     originals: dict[str, str]
     modules: dict[str, tuple[str, str]]
     max_iterations: int
+    simulation: bool = False
     evidence: Evidence = field(default_factory=Evidence)
     started: float = field(default_factory=monotonic)
 
 
 class RunStore:
-    def __init__(self, root: Path, step_seconds: float = 0.2):
+    def __init__(self, root: Path, step_seconds: float = 0.2, pipeline: str = "verify"):
         self.root = root
         self.step_seconds = step_seconds
+        self.pipeline = pipeline
+        self.verification_error = Error(
+            code="pipeline_unavailable", message="The real migration pipeline is not implemented; dynamic verification did not run.",
+        )
         self.runs: dict[str, Run] = {}
         self.tasks: set[asyncio.Task] = set()
         self.active: str | None = None
@@ -79,25 +84,35 @@ class RunStore:
                 text = path.read_text(encoding="utf-8", errors="replace")
                 modules[name] = (f"{source.name}/{relative.as_posix()}", text)
                 functions = len(re.findall(r"^\s*def [a-zA-Z]\w*\(", text, re.MULTILINE))
-                states.append(Module(name=name, tests_total=max(8, min(15, functions * 3))))
+                cases = max(8, min(15, functions * 3)) if self.pipeline == "simulation" else 0
+                states.append(Module(name=name, tests_total=cases))
         except OSError:
             raise RunError(400, "source_unreadable", "The source folder could not be read.") from None
         if not states:
             raise RunError(400, "source_empty", "The source folder contains no Python modules.")
         # Detect edits during inspection instead of pairing different snapshots.
-        if originals != hashes_for(source):
-            raise RunError(409, "source_changed", "Source files changed while being inspected. Try again.")
+        try:
+            if originals != hashes_for(source):
+                raise RunError(409, "source_changed", "Source files changed while being inspected. Try again.")
+        except OSError:
+            raise RunError(400, "source_unreadable", "The source folder could not be read.") from None
         state = RunState(
             modules=states, hashes={**originals, "unchanged": None},
             metrics=Metrics(tests_total=sum(module.tests_total for module in states)),
         )
-        run = Run(state, source, originals, modules, max_iterations)
-        run.evidence.append("run_started", "SIMULATED run: no code execution, migration, model calls, or security fixes.")
+        simulation = self.pipeline == "simulation"
+        run = Run(state, source, originals, modules, max_iterations, simulation=simulation)
+        notice = (
+            "SIMULATED run: no code execution, migration, model calls, or security fixes."
+            if simulation else "Static source inventory only; no code execution, migration, tests, or security scan."
+        )
+        run.evidence.append("run_started", notice)
         run.evidence.append("hashes_recorded", f"SHA-256 recorded from {len(originals)} actual source files.")
         run_id = uuid4().hex
         self.runs[run_id] = run
         self.active = run_id
-        task = asyncio.create_task(self._simulate(run_id))
+        worker = self._simulate if simulation else self._verification_unavailable
+        task = asyncio.create_task(worker(run_id))
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
         return run_id
@@ -113,6 +128,29 @@ class RunStore:
 
     async def _pause(self):
         await asyncio.sleep(self.step_seconds)
+
+    async def _verification_unavailable(self, run_id: str):
+        run = self.runs[run_id]
+        try:
+            run.state.status = "running"
+            await self._pause()
+            run.state.hashes["unchanged"] = hashes_for(run.source) == run.originals
+            if not run.state.hashes["unchanged"]:
+                self._fail(run, "source_changed", "Original files changed during source inspection.")
+            else:
+                self._fail(run, self.verification_error.code, self.verification_error.message)
+            # Contract has no 'unverified' module status. Required verification failed.
+            for module in run.state.modules:
+                module.status = "failed"
+        except asyncio.CancelledError:
+            self._fail(run, "run_interrupted", "Run interrupted by application shutdown.")
+            raise
+        except OSError:
+            self._fail(run, "source_unreadable", "Original file hashes could not be rechecked.")
+        finally:
+            run.state.metrics.seconds = round(monotonic() - run.started, 3)
+            run.state.chain_intact = run.evidence.verify()
+            self.active = None
 
     async def _simulate(self, run_id: str):
         run = self.runs[run_id]
@@ -186,7 +224,7 @@ class RunStore:
         run.state.status = "failed"
         run.state.error = Error(code=code, message=message)
         run.evidence.append("error", message)
-        run.evidence.append("run_finished", "SIMULATED run failed.")
+        run.evidence.append("run_finished", "Run failed; no migration was verified.")
 
     @staticmethod
     def _findings(run: Run, path: str, text: str):
