@@ -184,3 +184,16 @@ def test_static_frontend_and_api_precedence(project, monkeypatch):
 def test_missing_frontend_landing_page(client):
     assert client.get("/").status_code == 200
     assert "Proofport" in client.get("/").text
+
+
+def test_tampered_durable_evidence_revokes_success(client, project):
+    run_id = start(client)
+    wait_done(client, run_id)
+    evidence = client.app.state.runs.get(run_id).evidence
+    log = project / "evidence.log"
+    evidence.bind(log)
+    log.write_text(log.read_text().replace("SIMULATED", "TAMPERED"))
+    state = client.get(f"/api/runs/{run_id}").json()
+    assert state["status"] == "failed"
+    assert state["chain_intact"] is False
+    assert state["error"]["code"] == "evidence_corrupted"

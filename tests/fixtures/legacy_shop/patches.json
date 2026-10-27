@@ -1,0 +1,209 @@
+{
+  "mode": "explicit_fixture_patches_not_ai",
+  "notice": "Authored migration candidates for pipeline integration tests. No Meta call. Never expected outputs.",
+  "files": {
+    "legacy_shop/__init__.py": {
+      "sha256": "91bda378d5009b538115bd41dfe90cbeba00dd43ed0cb177930be46bc2de923c",
+      "replace": []
+    },
+    "legacy_shop/cli.py": {
+      "sha256": "1e403e33929882f95ee64948b23609b12384c8cdf6930f20ef9af68be255e23f",
+      "replace": [
+        [
+          "except KeyError, e:",
+          "except KeyError as e:"
+        ],
+        [
+          "except ValueError, e:",
+          "except ValueError as e:"
+        ],
+        [
+          "print >>sys.stderr, \"usage: cli.py inventory.csv YYYY-MM-DD\"",
+          "print(\"usage: cli.py inventory.csv YYYY-MM-DD\", file=sys.stderr)"
+        ],
+        [
+          "raw_input(",
+          "input("
+        ],
+        [
+          "print \"Saved.\"",
+          "print(\"Saved.\")"
+        ],
+        [
+          "\"bad number in row %r: %s\" % (row, e)",
+          "\"bad number in row %s: %s\" % (_legacy_row_repr(row), _legacy_error(e))"
+        ]
+      ],
+      "prefix": "def _legacy_row_repr(row):\n    preferred = ['price', 'added', 'name', 'qty']\n    keys = [key for key in preferred if key in row] + sorted(key for key in row if key not in preferred)\n    return '{' + ', '.join('%r: %r' % (key, row[key]) for key in keys) + '}'\n\ndef _legacy_error(error):\n    message = str(error)\n    prefix = 'could not convert string to float: '\n    if message.startswith(prefix):\n        value = message[len(prefix):]\n        if len(value) >= 2 and value[0] == value[-1] and value[0] in \"\\\"'\":\n            return prefix + value[1:-1]\n    return message\n\n"
+    },
+    "legacy_shop/config.py": {
+      "sha256": "9fd4014ae97d79a2b2b1313f8db175b493549e7047021f7e414dfb1b6fecac75",
+      "replace": [
+        [
+          "return eval(raw)",
+          "return _py2_eval(raw)"
+        ]
+      ],
+      "prefix": "import ast\nfrom legacy_shop.mathutils import _py2_div\n\nclass _Division(ast.NodeTransformer):\n    def visit_BinOp(self, node):\n        self.generic_visit(node)\n        if isinstance(node.op, ast.Div):\n            return ast.copy_location(ast.Call(func=ast.Name(id='_py2_div', ctx=ast.Load()), args=[node.left, node.right], keywords=[]), node)\n        return node\n\ndef _py2_eval(raw):\n    tree = ast.fix_missing_locations(_Division().visit(ast.parse(raw, mode='eval')))\n    return eval(compile(tree, '<string>', 'eval'))\n\n"
+    },
+    "legacy_shop/dates.py": {
+      "sha256": "99c8f8ed5a1744b2a8d039f2fd87fb2dc4c2f5a6d80302aaa20922f91f71cb4f",
+      "replace": [
+        [
+          "items.sort(lambda x, y: cmp(parse_date(x[0]), parse_date(y[0])))",
+          "items.sort(key=lambda pair: parse_date(pair[0]))"
+        ]
+      ]
+    },
+    "legacy_shop/inventory.py": {
+      "sha256": "0e5f9e3ab5039439afd1f6609e8c466ebadbf7fa16bcab171ad8e4a7cf612182",
+      "replace": [
+        [
+          "return cmp(self.name, other.name)",
+          "return (self.name > other.name) - (self.name < other.name)"
+        ],
+        [
+          "    def __repr__(self):",
+          "    def __lt__(self, other):\n        return self.__cmp__(other) < 0\n\n    def __le__(self, other):\n        return self.__cmp__(other) <= 0\n\n    def __eq__(self, other):\n        return self.__cmp__(other) == 0\n\n    def __ne__(self, other):\n        return self.__cmp__(other) != 0\n\n    def __gt__(self, other):\n        return self.__cmp__(other) > 0\n\n    def __ge__(self, other):\n        return self.__cmp__(other) >= 0\n\n    __hash__ = object.__hash__\n\n    def __repr__(self):"
+        ],
+        [
+          "    def add(self, item):",
+          "    __bool__ = __nonzero__\n\n    def add(self, item):"
+        ],
+        [
+          "self.items.has_key(item.name)",
+          "item.name in self.items"
+        ],
+        [
+          "raise KeyError, \"duplicate item: %s\" % item.name",
+          "raise KeyError(\"duplicate item: %s\" % item.name)"
+        ],
+        [
+          "names = self.items.keys()",
+          "names = list(self.items.keys())"
+        ],
+        [
+          "self.items.iteritems()",
+          "self.items.items()"
+        ],
+        [
+          "ordered = self.items.values()",
+          "ordered = list(self.items.values())"
+        ],
+        [
+          "sorted(ordered, cmp=lambda a, b: cmp(a.price, b.price))",
+          "sorted(ordered, key=lambda item: item.price)"
+        ]
+      ]
+    },
+    "legacy_shop/mathutils.py": {
+      "sha256": "7a54b8990c46855a0429837dfe29d87d386af6974d70f6f6aa9380ba79e1e401",
+      "replace": [
+        [
+          "raise ValueError, \"mean of empty list\"",
+          "raise ValueError(\"mean of empty list\")"
+        ],
+        [
+          "sum(values) / len(values)",
+          "_py2_div(sum(values), len(values))"
+        ],
+        [
+          "len(ordered) / 2",
+          "len(ordered) // 2"
+        ],
+        [
+          "(ordered[mid - 1] + ordered[mid]) / 2",
+          "_py2_div(ordered[mid - 1] + ordered[mid], 2)"
+        ],
+        [
+          "part * 100 / whole",
+          "_py2_div(part * 100, whole)"
+        ],
+        [
+          "int(round(amount))",
+          "int(math.floor(amount + 0.5) if amount >= 0 else math.ceil(amount - 0.5))"
+        ],
+        [
+          "1L",
+          "1"
+        ],
+        [
+          "xrange(",
+          "range("
+        ],
+        [
+          "int(p) / size * size",
+          "_py2_div(int(p), size) * size"
+        ]
+      ],
+      "prefix": "import math\n\ndef _py2_div(a, b):\n    return a // b if isinstance(a, int) and isinstance(b, int) else a / b\n\n"
+    },
+    "legacy_shop/report.py": {
+      "sha256": "18cbf4d7d1079185303b2acdbfaeb8fd45d0c09a657b3efa947e17eb26900749",
+      "replace": [
+        [
+          "        print line",
+          "        print(line)"
+        ],
+        [
+          "    print\n",
+          "    print()\n"
+        ],
+        [
+          "print \"Items:\", len(inventory.items)",
+          "print(\"Items:\", len(inventory.items))"
+        ],
+        [
+          "print >>sys.stderr, \"WARNING: %s\" % msg",
+          "print(\"WARNING: %s\" % msg, file=sys.stderr)"
+        ]
+      ]
+    },
+    "legacy_shop/storage.py": {
+      "sha256": "1c3397f52e5de0f2b4ec88e32c3136507d9e6b25458c5f3f65afabf276eeb480",
+      "replace": [
+        [
+          "hashlib.md5(password + SECRET_KEY)",
+          "hashlib.md5(password + SECRET_KEY.encode('utf-8') if isinstance(password, bytes) else (password + SECRET_KEY).encode('utf-8'))"
+        ],
+        [
+          "def load_csv(path):\n    rows = []\n    f = open(path, 'rb')",
+          "def load_csv(path):\n    rows = []\n    f = open(path, 'r', newline='')"
+        ],
+        [
+          "pickle.dump(obj, f)",
+          "pickle.dump(obj, f, protocol=0)"
+        ]
+      ]
+    },
+    "legacy_shop/textutils.py": {
+      "sha256": "246021b7f9bbb88dabcd3af7eceeed8af252affe85f0369a1647b074f3861e31",
+      "replace": [
+        [
+          "isinstance(title, str)",
+          "isinstance(title, bytes)"
+        ],
+        [
+          "counts.has_key(word)",
+          "word in counts"
+        ],
+        [
+          "pairs = counts.items()",
+          "pairs = list(counts.items())"
+        ],
+        [
+          "pairs.sort(lambda a, b: cmp(b[1], a[1]) or cmp(a[0], b[0]))",
+          "pairs.sort(key=lambda pair: (-pair[1], pair[0]))"
+        ],
+        [
+          "(width - len(title)) / 2",
+          "(width - len(title)) // 2"
+        ],
+        [
+          "return slug.encode('ascii', 'ignore')",
+          "return slug.encode('ascii', 'ignore').decode('ascii')"
+        ]
+      ]
+    }
+  }
+}

@@ -63,3 +63,16 @@ def test_simulation_cannot_masquerade_as_live_or_replay(project, monkeypatch, mo
         assert response.status_code == 503
         assert response.json()["error"]["code"] == "pipeline_unavailable"
         assert not client.app.state.runs.runs
+
+
+def test_invalid_runtime_settings_do_not_leave_a_busy_run(project, monkeypatch):
+    monkeypatch.setenv("PROOFPORT_PIPELINE", "verify")
+    monkeypatch.setenv("PROOFPORT_CASES_FILE", "cases.json")
+    monkeypatch.setenv("SANDBOX_TIMEOUT_SECONDS", "NaN")
+    monkeypatch.setattr("backend.api.main.docker_available", lambda: True)
+    with TestClient(create_app(project)) as client:
+        run_id = client.post("/api/runs", json={"source_path": "samples/legacy_shop"}).json()["run_id"]
+        state = client.get(f"/api/runs/{run_id}").json()
+        assert state["status"] == "failed"
+        assert state["error"]["code"] == "invalid_settings"
+        assert client.app.state.runs.active is None

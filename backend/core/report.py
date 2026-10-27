@@ -7,23 +7,32 @@ from backend.core.runs import Run
 
 
 def report_data(run: Run) -> dict:
-    return {
-        "simulation": run.simulation,
-        "notice": (
+    real = bool(run.verification)
+    notice = (
+        f"REAL Docker execution; provider={run.execution_mode}; status={run.state.status}. "
+        "Fixture candidates are not AI migration. Verification covers only the recorded inputs and existing tests. "
+        "Potential security findings are not automatically fixed; zero findings would not prove complete safety."
+        if real else (
             "SIMULATED migration, tests, security fixes, tokens and costs. File hashes and evidence chain are real. No source was executed or modified."
             if run.simulation else "STATIC INVENTORY ONLY. Dynamic verification and security scanning did not run. No migration was performed or verified. Zero findings means not scanned, not secure. No source was executed or modified."
-        ),
+        )
+    )
+    return {
+        "simulation": run.simulation,
+        "notice": notice,
         "state": run.state.snapshot(),
-        "settings": {"pipeline": "simulation" if run.simulation else "static_only", "model": None, "max_iterations": run.max_iterations},
-        "allowed_differences": [],
+        "settings": {"pipeline": "simulation" if run.simulation else run.execution_mode, "model": run.verification.get("model"), "max_iterations": run.max_iterations},
+        "allowed_differences": [{"case": comparison["id"], **difference} for comparison in run.verification.get("comparisons", []) for difference in comparison["allowed_differences"]],
+        "verification": run.verification,
         "events": run.evidence.since(0),
     }
 
 
 def render_html(data: dict) -> str:
     state = data["state"]
-    title = "Proofport simulated run report" if data["simulation"] else "Proofport unverified source inventory"
-    tests_label = "Simulated tests" if data["simulation"] else "Executed tests (unavailable)"
+    real = bool(data.get("verification"))
+    title = "Proofport simulated run report" if data["simulation"] else ("Proofport Docker verification report" if real else "Proofport unverified source inventory")
+    tests_label = "Simulated tests" if data["simulation"] else ("Recorded cases passed" if real else "Executed tests (unavailable)")
     modules = "".join(
         f"<tr><td>{escape(m['name'])}</td><td>{m['status']}</td>"
         f"<td>{m['iterations']}</td><td>{m['tests_passed']}/{m['tests_total']}</td></tr>"

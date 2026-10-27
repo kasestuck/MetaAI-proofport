@@ -3,8 +3,6 @@
 from contextlib import asynccontextmanager
 import os
 from pathlib import Path
-import shutil
-import subprocess
 from typing import Literal
 
 from dotenv import dotenv_values
@@ -17,22 +15,14 @@ from starlette.exceptions import HTTPException
 from backend.core.models import Error, RunState, StartRun
 from backend.core.report import render_html, report_data
 from backend.core.runs import RunError, RunStore
+from backend.sandbox.runner import DockerRunner
 
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def docker_available() -> bool:
-    docker = shutil.which("docker")
-    if not docker:
-        return False
-    try:
-        return subprocess.run(
-            [docker, "info", "--format", "{{.ServerVersion}}"],
-            capture_output=True, timeout=3, check=False,
-        ).returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        return False
+    return DockerRunner().available()
 
 
 def create_app(root: Path = ROOT, step_seconds: float = 0.2) -> FastAPI:
@@ -41,13 +31,14 @@ def create_app(root: Path = ROOT, step_seconds: float = 0.2) -> FastAPI:
     if mode not in {"live", "mock", "replay"}:
         raise ValueError("LLM_MODE must be live, mock, or replay.")
     pipeline = settings.get("PROOFPORT_PIPELINE", "verify")
-    if pipeline not in {"verify", "simulation"}:
-        raise ValueError("PROOFPORT_PIPELINE must be verify or simulation.")
-    store = RunStore(root, step_seconds, pipeline=pipeline)
+    if pipeline not in {"verify", "simulation", "fixtures"}:
+        raise ValueError("PROOFPORT_PIPELINE must be verify, fixtures, or simulation.")
+    store = RunStore(root, step_seconds, pipeline=pipeline, settings=settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.docker = docker_available()
+        store.real_enabled = app.state.docker and bool(settings.get("PROOFPORT_CASES_FILE"))
         if not app.state.docker:
             store.verification_error = Error(
                 code="docker_unavailable",
@@ -80,8 +71,8 @@ def create_app(root: Path = ROOT, step_seconds: float = 0.2) -> FastAPI:
 
     @app.post("/api/runs")
     async def start_run(body: StartRun):
-        if pipeline == "simulation" and mode != "mock":
-            raise RunError(503, "pipeline_unavailable", "Simulation requires LLM_MODE=mock and cannot stand in for live or replay verification.")
+        if pipeline in {"simulation", "fixtures"} and mode != "mock":
+            raise RunError(503, "pipeline_unavailable", "Simulation/fixtures require LLM_MODE=mock and cannot stand in for live or replay model calls.")
         return {"run_id": store.start(body.source_path, body.max_iterations)}
 
     @app.get("/api/runs/{run_id}", response_model=RunState, response_model_exclude_unset=True)
@@ -110,7 +101,7 @@ def create_app(root: Path = ROOT, step_seconds: float = 0.2) -> FastAPI:
     else:
         @app.get("/", response_class=HTMLResponse)
         async def index():
-            return '<h1>Proofport backend is running</h1><p>Real migration verification is not implemented. Static inventory and explicit demo simulation are available. Frontend files have not been added yet.</p><a href="/docs">API documentation</a>'
+            return '<h1>Proofport backend is running</h1><p>Docker-only Python 2.7 to 3.12 verification. Configure golden inputs and a live model or explicitly select fixture candidates. Frontend files have not been added yet.</p><a href="/docs">API documentation</a>'
 
     return app
 

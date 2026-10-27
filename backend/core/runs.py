@@ -1,4 +1,4 @@
-"""Read-only source inspection and an explicitly simulated background run."""
+"""Run state, explicit simulation, and Docker-backed verification workers."""
 
 import asyncio
 from dataclasses import dataclass, field
@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from backend.core.evidence import Evidence
 from backend.core.models import Error, Finding, Metrics, Module, RunState
+from backend.sandbox.runner import DockerRunner, SandboxError
 
 
 class RunError(Exception):
@@ -46,17 +47,23 @@ class Run:
     modules: dict[str, tuple[str, str]]
     max_iterations: int
     simulation: bool = False
+    execution_mode: str = "static_only"
+    workspace: Path | None = None
+    verification: dict = field(default_factory=dict)
+    runner: DockerRunner | None = None
     evidence: Evidence = field(default_factory=Evidence)
     started: float = field(default_factory=monotonic)
 
 
 class RunStore:
-    def __init__(self, root: Path, step_seconds: float = 0.2, pipeline: str = "verify"):
+    def __init__(self, root: Path, step_seconds: float = 0.2, pipeline: str = "verify", settings: dict | None = None):
         self.root = root
         self.step_seconds = step_seconds
         self.pipeline = pipeline
+        self.settings = settings or {}
+        self.real_enabled = False
         self.verification_error = Error(
-            code="pipeline_unavailable", message="The real migration pipeline is not implemented; dynamic verification did not run.",
+            code="pipeline_unavailable", message="Configure PROOFPORT_CASES_FILE for recorded behavior verification; no invented test inputs are used.",
         )
         self.runs: dict[str, Run] = {}
         self.tasks: set[asyncio.Task] = set()
@@ -111,7 +118,7 @@ class RunStore:
         run_id = uuid4().hex
         self.runs[run_id] = run
         self.active = run_id
-        worker = self._simulate if simulation else self._verification_unavailable
+        worker = self._simulate if simulation else (self._real_pipeline if self.real_enabled else self._verification_unavailable)
         task = asyncio.create_task(worker(run_id))
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
@@ -124,10 +131,33 @@ class RunStore:
         if run.state.status in {"queued", "running"}:
             run.state.metrics.seconds = round(monotonic() - run.started, 3)
         run.state.chain_intact = run.evidence.verify()
+        if not run.state.chain_intact and run.state.status == "done":
+            run.state.status = "failed"
+            run.state.error = Error(code="evidence_corrupted", message="Persisted evidence was modified; verification can no longer be trusted.")
         return run
 
     async def _pause(self):
         await asyncio.sleep(self.step_seconds)
+
+    async def _real_pipeline(self, run_id: str):
+        from backend.core.pipeline import execute
+        run = self.runs[run_id]
+        try:
+            run.runner = DockerRunner(timeout=float(self.settings.get("SANDBOX_TIMEOUT_SECONDS", "30")))
+        except (ValueError, SandboxError):
+            self._fail(run, "invalid_settings", "SANDBOX_TIMEOUT_SECONDS must be finite, positive and at most 300 seconds.")
+            self.active = None
+            return
+        mode = "fixtures" if self.pipeline == "fixtures" else "live"
+        worker = asyncio.create_task(asyncio.to_thread(execute, run, run_id, self.root, self.settings, mode))
+        try:
+            await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            await asyncio.to_thread(run.runner.cancel)
+            await worker
+            raise
+        finally:
+            self.active = None
 
     async def _verification_unavailable(self, run_id: str):
         run = self.runs[run_id]
