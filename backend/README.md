@@ -6,11 +6,24 @@ the browser after the server is ready. Ctrl+C stops the server. API docs: `/docs
 If port 8000 is occupied, set `PROOFPORT_PORT=8001` in the terminal before
 starting the batch file. The browser uses the selected port.
 
-The worker is **simulated**, even when `LLM_MODE=live`. It never executes or
-modifies source files. Migration/test counts, security remediation, tokens, and
-costs in run metrics are demo estimates. SHA-256 hashes and the evidence chain
-are real. Each run rechecks all original files before finishing. Data lives in
-memory and disappears when the server stops. Only one run can be active.
+The real migration pipeline is **not implemented**. By default a run only
+inventories directory sources and hashes actual files, then fails with
+`docker_unavailable` or `pipeline_unavailable`. Dynamic tests, migration, model
+calls, and security scans do not run; their metrics stay zero. No code is
+executed on the host. Empty findings mean not scanned. Data is in memory and
+disappears when the server stops. Only one run can be active.
+
+For the original frontend plumbing demo, explicitly set both server settings:
+
+```dotenv
+PROOFPORT_PIPELINE=simulation
+LLM_MODE=mock
+```
+
+Only that mode generates simulated green modules, test counts, security fixes,
+tokens and costs. Its reports/events are labelled. It is rejected with live or
+replay mode and does not prove migration. SHA-256 hashes and evidence chains
+remain real in both modes. `PROOFPORT_PIPELINE=verify` is the default.
 
 The provided checkout has no `docs/BRIEF.md` or `samples/legacy_shop`. The API
 implements section 8 of the supplied full project specification. Add the real
@@ -36,8 +49,21 @@ variables override `.env`. `complete(system, user, json_mode=False)` returns
 text. `calls`, `tokens_in`, `tokens_out`, and `cost_usd` track actual client
 usage; call records hold prompt hashes and duration, never prompt text or keys.
 Live calls have a 30-second timeout and at most two SDK retries with backoff.
-Replay and the real sandbox/pipeline belong to later milestones. Simulation
-reports always show reduced isolation because no sandbox runs.
+Replay has not been implemented: the health mode reports configuration, not
+verified support. The real sandbox/pipeline remains blocked on prerequisites;
+neither mock nor replay can substitute for execution. Reports show reduced
+isolation because no sandbox runs; this never enables a host subprocess fallback.
+
+Audit, concrete file plan, prerequisites, and proposed (unimplemented) API
+extensions: [ARCHITECTURE.md](ARCHITECTURE.md). Check local P0 readiness without
+executing sources, pulling images, or calling a model:
+
+```powershell
+.venv/Scripts/python.exe -m backend.core.readiness
+```
+
+Exit code 2 means not ready. It reports no credentials and does not infer
+runtime correctness from image presence or a configured model name.
 
 Run tests from the repo root:
 
