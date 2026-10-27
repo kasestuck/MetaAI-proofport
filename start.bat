@@ -53,8 +53,8 @@ if errorlevel 1 (
 )
 if not defined PROOFPORT_PORT set "PROOFPORT_PORT=8000"
 echo Starting Proofport at http://127.0.0.1:%PROOFPORT_PORT% - press Ctrl+C to stop.
-echo Real migration verification is not implemented. Default runs only inventory and hash sources.
-echo Demo simulation requires PROOFPORT_PIPELINE=simulation and LLM_MODE=mock.
+echo Real verification requires Docker images and PROOFPORT_CASES_FILE.
+echo Live Meta requires key/model. Non-AI fixtures require explicit fixture mode.
 ".venv\Scripts\python.exe" -m backend.launcher
 set "PROOFPORT_EXIT=%errorlevel%"
 popd

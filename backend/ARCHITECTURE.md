@@ -1,5 +1,51 @@
 # Architecture audit and staged implementation plan
 
+## Current implementation: 2026-10-28
+
+The user supplied `samples/legacy_shop` and working Docker Desktop. The project
+root contains tests/data; the package is nested inside. Its actual existing
+test count is 10. Docker discovery now handles the per-user Windows install,
+which was absent from terminal PATH.
+
+Implemented and exercised with real Docker: bounded, non-root, network-off,
+read-only sandbox; source-interpreter AST analyzer and dependency ordering;
+Python 2.7/3.12 golden harness; strict comparator; source-hash-bound fixture
+provider; iterative translate/compile/test/compare/fix worker; Bandit 1.8.6;
+original hashes; durable evidence log and HTML/JSON reports. API fields and
+frontend remain unchanged. Runtime image IDs are recorded. Host execution
+fallback remains forbidden.
+
+Initial execution: 10/10 original tests pass in Python 2.7. Authored fixture
+candidates preserve 90/90 recorded cases and 10/10 existing tests in Python
+3.12. These are real verification results, **not AI migration**. Expected
+outputs are recorded from originals, not supplied as fixture answers. The live
+Meta translator/repair adapter is connected but has not been validated against
+Meta: key/model are not configured. Missing credentials never trigger fixture
+fallback. Replay remains unimplemented.
+
+New files: `sandbox/runner.py`, `sandbox/analyze_py2.py`, `sandbox/harness.py`,
+`sandbox/Dockerfile.bandit`; `core/analyzer.py`, `core/recorder.py`,
+`core/comparator.py`, `core/workspace.py`, `core/translator.py`,
+`core/pipeline.py`, `core/security.py`. Existing API/run/report/evidence/readiness
+adapters are extended. Authored manifests are in `../tests/fixtures/legacy_shop/`;
+generated results are in ignored `backend/.work/`. Setup is in `README.md`.
+
+Bandit finds 8 potential issues in the tested candidate, including eval, MD5,
+pickle, formatted SQL, shell execution and a hard-coded secret. The count also
+includes import advisories. Nothing is automatically remediated. The original
+scan has 8 findings but skips 4 Python 2 files it cannot parse; coverage is
+partial. The candidate scan has no parse errors.
+
+Remaining: real Meta call with provisioned credentials; replay; general case
+generation/coverage assessment; more projects/runtimes; separately reviewed
+Python 2-only test ports; verified security remediation/rollback; API history
+and resume. Finite recorded cases do not establish universal equivalence, full
+pickle/data-format compatibility, or complete security. P2-P4 remain future work.
+
+The audit below is retained as a **historical 2026-10-27 snapshot**. Its missing
+prerequisite and unimplemented-P0 statements are superseded by this section.
+Its proposed API extensions remain proposals only.
+
 Audit date: 2026-10-27. Branch: `backend/codex`. Baseline: `8050c94`.
 Scope: `backend/`, `tests/`, `start.bat`. No frontend or API contract changes.
 

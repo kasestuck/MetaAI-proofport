@@ -1,72 +1,136 @@
-# Backend skeleton
+# Proofport backend
 
-Python 3.12 is required. Run `start.bat` from any directory. It creates `.venv`,
-installs `backend/requirements.txt`, serves `http://127.0.0.1:8000`, and opens
-the browser after the server is ready. Ctrl+C stops the server. API docs: `/docs`.
-If port 8000 is occupied, set `PROOFPORT_PORT=8001` in the terminal before
-starting the batch file. The browser uses the selected port.
+Python 3.12, FastAPI, Docker-only Python 2.7 to Python 3.12 verification.
+Endpoint paths and state fields follow the existing shared contract. Frontend
+is untouched. See `ARCHITECTURE.md` for the staged plan and historical audit.
 
-The real migration pipeline is **not implemented**. By default a run only
-inventories directory sources and hashes actual files, then fails with
-`docker_unavailable` or `pipeline_unavailable`. Dynamic tests, migration, model
-calls, and security scans do not run; their metrics stay zero. No code is
-executed on the host. Empty findings mean not scanned. Data is in memory and
-disappears when the server stops. Only one run can be active.
+## Project and trusted images
 
-For the original frontend plumbing demo, explicitly set both server settings:
+The unpacked root is `samples/legacy_shop`, containing `tests/`, `sample_data/`,
+and the inner package `legacy_shop/`. Pass that outer directory as `source_path`;
+the inner package alone omits its tests and data. The original 15 files remain
+unchanged. This project has 10 tests, not the 11 in the earlier specification.
 
-```dotenv
-PROOFPORT_PIPELINE=simulation
-LLM_MODE=mock
+```powershell
+docker pull python:2.7
+docker pull python:3.12-slim
+docker build -t proofport-bandit:1.8.6 -f backend/sandbox/Dockerfile.bandit backend/sandbox
 ```
 
-Only that mode generates simulated green modules, test counts, security fixes,
-tokens and costs. Its reports/events are labelled. It is rejected with live or
-replay mode and does not prove migration. SHA-256 hashes and evidence chains
-remain real in both modes. `PROOFPORT_PIPELINE=verify` is the default.
+Networking is used only during trusted image/dependency setup. Project
+execution and scanning are offline. The runner resolves local tags to immutable
+image IDs, records them, and never pulls during execution. CLI discovery also
+checks the per-user Docker Desktop installation under
+`%LOCALAPPDATA%/Programs/DockerDesktop/resources/bin` if it is not in PATH.
+For manual setup commands, add that directory to terminal PATH when needed.
 
-The provided checkout has no `docs/BRIEF.md` or `samples/legacy_shop`. The API
-implements section 8 of the supplied full project specification. Add the real
-samples to use `{"source_path":"samples/legacy_shop"}` with `POST /api/runs`.
-Other local Python source folders also work. Missing sources return
-`source_not_found`; no sample hashes are invented. Tests create their own
-original Python 2 fixtures in temporary folders.
+## Explicit fixtures: real verification, no AI
 
-`backend.llm.client.LLMClient` defaults to offline `mock` mode. For real calls,
-create an untracked `.env` in the repo root:
+From a PowerShell terminal at the repo root:
+
+```powershell
+$env:LLM_MODE = 'mock'
+$env:PROOFPORT_PIPELINE = 'fixtures'
+$env:PROOFPORT_CASES_FILE = 'tests/fixtures/legacy_shop/cases.json'
+$env:PROOFPORT_FIXTURE_FILE = 'tests/fixtures/legacy_shop/patches.json'
+.\start.bat
+```
+
+POST `{"source_path":"samples/legacy_shop","max_iterations":2}` to `/api/runs`.
+Fixtures are authored inputs and source-hash-bound compatibility patches,
+**not expected outputs or Meta responses**. Expected results are recorded by
+executing originals in Docker Python 2.7. Candidates, all golden comparisons,
+and the same existing test IDs run in Docker Python 3.12. Fixture runs consume
+zero model tokens and are never presented as AI migration.
+
+`start.bat` creates `.venv`, installs `backend/requirements.txt`, starts uvicorn
+at `http://127.0.0.1:8000`, and opens the browser after readiness. Ctrl+C stops
+it. Set `PROOFPORT_PORT=8001` if needed. API docs: `/docs`.
+
+## Live Meta migration
+
+Create an untracked `.env` in the repo root with genuine provider settings:
 
 ```dotenv
+PROOFPORT_PIPELINE=verify
+PROOFPORT_CASES_FILE=tests/fixtures/legacy_shop/cases.json
 LLM_MODE=live
-MODEL_API_KEY=your-key
-MODEL_NAME=your-model
+MODEL_API_KEY=your-private-key
+MODEL_NAME=your-provisioned-model
 MODEL_BASE_URL=https://api.meta.ai/v1
 PRICE_IN_PER_MTOK=1.25
 PRICE_OUT_PER_MTOK=4.25
+SANDBOX_TIMEOUT_SECONDS=30
 ```
 
-`LLM_MODE=mock` needs no key or model and incurs no charges. Environment
-variables override `.env`. `complete(system, user, json_mode=False)` returns
-text. `calls`, `tokens_in`, `tokens_out`, and `cost_usd` track actual client
-usage; call records hold prompt hashes and duration, never prompt text or keys.
-Live calls have a 30-second timeout and at most two SDK retries with backoff.
-Replay has not been implemented: the health mode reports configuration, not
-verified support. The real sandbox/pipeline remains blocked on prerequisites;
-neither mock nor replay can substitute for execution. Reports show reduced
-isolation because no sandbox runs; this never enables a host subprocess fallback.
+Environment variables override `.env`; clear fixture-mode terminal settings
+before switching to live mode. Missing credentials produce `model_unavailable`,
+even after successful golden recording. There is no automatic fixture fallback.
+The SDK uses a 30-second request timeout and at most two retries. The live
+translate/fix path is connected but no actual Meta request has been validated
+here: the key/model are not configured. Health reports configuration, not
+provider access. Replay is still unimplemented and cannot count as model use.
 
-Audit, concrete file plan, prerequisites, and proposed (unimplemented) API
-extensions: [ARCHITECTURE.md](ARCHITECTURE.md). Check local P0 readiness without
-executing sources, pulling images, or calling a model:
+Without explicit golden inputs or working Docker, requests only inventory/hash
+sources and fail without fictional successes. `PROOFPORT_PIPELINE=simulation`
+and `LLM_MODE=mock` retain the old labelled frontend demo with fictional
+metrics. The separate `fixtures` mode performs real container verification.
+
+## Verification, safety and artifacts
+
+The source-interpreter AST analyzer does not import target modules. The worker
+orders dependencies, records behavior and existing tests, translates candidates,
+compiles under the target interpreter, compares cases and test IDs, and supplies
+failure evidence to subsequent iterations. Missing coverage, an empty/failing
+baseline suite, changed test IDs, compile errors, or exhausted mismatches cannot
+produce success. Test sources are not rewritten to make candidates pass;
+Python 2-only test syntax requires a separately reviewed port.
+
+The harness captures tagged values, exceptions, stdout/stderr, object scenarios
+and selected file/SQL operations. Only documented text/bytes and errno-backed
+I/O-name differences are allowed and reported. Dict/set order is ignored;
+sequence order, value types, floats and output text remain exact. This proves
+recorded cases, not every input or side effect. Fixture patches for eval and
+CSV diagnostics cover selected expressions and this dataset; arbitrary eval
+namespaces, Python 2 hash ordering and pickle-format interoperability are not
+exhaustively verified.
+
+Every project execution uses Docker with a non-root UID, disabled networking,
+read-only source/tool/root mounts, dropped capabilities, no-new-privileges,
+CPU/memory/swap/PID/descriptor limits, bounded temp/output, timeout and container
+cleanup. No model key, Docker socket or writable host volume is exposed to the
+project. There is no host Python fallback. These controls are integration-tested;
+Docker is not a universal guarantee against hostile native/kernel exploits.
+
+Bandit 1.8.6 scans read-only copies offline. It cannot parse four original
+Python 2 files, so the initial scan is explicitly partial. The Python 3 scan
+covers all files. Findings include CWE, severity, confidence and location and
+remain `open` or `needs_review`. No automatic fix or security certification is
+claimed. Source snippets and hard-coded secret values are omitted from stored
+scanner results. A clean scan would not prove complete security.
+
+Real runs persist `backend/.work/<run_id>/` (git-ignored): `copy/`, `migrated/`,
+original hashes, analysis, `golden.json`, legacy/target test outcomes,
+comparisons per iteration, before/after scans, append-only hash-chained
+`evidence.log`, `report.json` and `report.html`. Original hashes and the persisted
+chain are rechecked. API state is in memory; artifacts survive restart but API
+resume/history loading is not implemented.
+
+## Tests and diagnostics
 
 ```powershell
+# Unit/API tests; Docker tests are visibly skipped by default.
+.venv/Scripts/python.exe -m pytest tests -q
+
+# Real integration, isolation limits, original/candidate behavior and failures.
+$env:PROOFPORT_DOCKER_TESTS = '1'
+.venv/Scripts/python.exe -m pytest tests -q
+
+# Read-only configuration preflight; no model call or project execution.
 .venv/Scripts/python.exe -m backend.core.readiness
 ```
 
-Exit code 2 means not ready. It reports no credentials and does not infer
-runtime correctness from image presence or a configured model name.
-
-Run tests from the repo root:
-
-```powershell
-.venv/Scripts/python.exe -m pytest tests -q
-```
+Enabled integration tests require the real sample and all three local images;
+missing prerequisites fail rather than producing synthetic passing results.
+Readiness exit 2 means configuration is incomplete. Exit 0 permits an attempt,
+not a claim that a provider request or migration has succeeded.
