@@ -26,7 +26,10 @@ def invoke(runner, image, source, action, cases=None, evidence=None):
 
 def load_cases(path):
     data = json.loads(path.read_text(encoding="utf-8"))
-    cases = data["cases"]
+    return validate_cases(data["cases"])
+
+
+def validate_cases(cases):
     if not isinstance(cases, list) or not cases or len({case["id"] for case in cases}) != len(cases):
         raise ValueError("Golden inputs must have nonempty, unique case IDs.")
     for case in cases:
