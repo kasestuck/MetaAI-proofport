@@ -43,6 +43,14 @@ executing originals in Docker Python 2.7. Candidates, all golden comparisons,
 and the same existing test IDs run in Docker Python 3.12. Fixture runs consume
 zero model tokens and are never presented as AI migration.
 
+For P2 security verification, also set
+`PROOFPORT_SECURITY_FIXTURES=tests/fixtures/security/legacy_shop_fixes.json`
+before starting the app. See [SECURITY.md](SECURITY.md) for actual outcomes,
+rollback/status semantics and the disabled future Meta interface. This stage
+is offline only; selecting security fixtures with live/replay migration is
+rejected before any SDK call. Four incompatible legacy proposals require
+review rather than being silently applied.
+
 `start.bat` creates `.venv`, installs `backend/requirements.txt`, starts uvicorn
 at `http://127.0.0.1:8000`, and opens the browser after readiness. Ctrl+C stops
 it. Set `PROOFPORT_PORT=8001` if needed. API docs: `/docs`.
@@ -105,8 +113,9 @@ Docker is not a universal guarantee against hostile native/kernel exploits.
 Bandit 1.8.6 scans read-only copies offline. It cannot parse four original
 Python 2 files, so the initial scan is explicitly partial. The Python 3 scan
 covers all files. Findings include CWE, severity, confidence and location and
-remain `open` or `needs_review`. No automatic fix or security certification is
-claimed. Source snippets and hard-coded secret values are omitted from stored
+default to `open` or `needs_review`. Optional P2 can verify narrow fixture
+hardening and contextual triage, or reject/review proposals after real checks;
+it is not a security certification or validated AI remediation. Source snippets and hard-coded secret values are omitted from stored
 scanner results. A clean scan would not prove complete security.
 
 Real runs persist `backend/.work/<run_id>/` (git-ignored): `copy/`, `migrated/`,

@@ -1,5 +1,33 @@
 # Architecture audit and staged implementation plan
 
+## Offline P2 implementation: 2026-10-29
+
+Added `security/models.py`, `security/providers.py`, `security/policy.py` and
+`security/engine.py`. Bandit details now have stable per-context IDs, CWE,
+confidence, descriptions and recommendations. Existing API Finding/state
+fields and the frontend are unchanged; detailed security history is exported.
+
+The independent engine stages candidates, compiles, compares real golden
+results, runs unchanged tests, rescans, checks original hashes and applies a
+conservative compatibility policy. It atomically accepts only verified supported
+hardening, otherwise keeps/restores the prior accepted copy. Final-check or
+log-integrity failure restores committed security changes. Evidence and
+redacted diffs are persisted. No paid API generation is enabled.
+
+Four legacy_shop fixture proposals (eval, SQL, subprocess, secret) are actually
+tested, but require review because they change behavior/configuration or have
+unsupported compatibility guarantees. No legacy security fix is claimed. A
+separate constant-command test fixture demonstrates supported hardening and
+contextual triage with real Docker. Reports distinguish raw warnings, fixed,
+open, false_positive, needs_review and fix_reverted.
+
+The future LLMClient proposal boundary has a structured schema and parser, but
+its generator is disabled and model-origin proposals cannot masquerade as
+fixtures. Actual Meta generation, broader safe transformations, replay,
+universal equivalence and comprehensive security remain unvalidated/future work.
+See `SECURITY.md` for setup, limitations and outcomes. Earlier P2-pending and
+no-automatic-fix descriptions below are historical snapshots.
+
 ## Current implementation: 2026-10-28
 
 The user supplied `samples/legacy_shop` and working Docker Desktop. The project
