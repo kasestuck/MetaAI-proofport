@@ -44,6 +44,8 @@ def execute(run, run_id, root, settings, mode):
     model_calls_recorded = 0
     state.status = "running"
     try:
+        if settings.get("PROOFPORT_SECURITY_FIXTURES") and mode != "fixtures":
+            raise PipelineFailure("offline_only", "Security fixture verification cannot invoke live or replay model generation.")
         if not runner.available():
             raise PipelineFailure("docker_unavailable", "Linux Docker is unavailable; host execution is forbidden.")
         for image in ("python:2.7", "python:3.12-slim", SCANNER_IMAGE):
@@ -205,6 +207,35 @@ def execute(run, run_id, root, settings, mode):
             if after["errors"]:
                 success = False
                 run.verification["limitations"].append("Target Bandit scan has parse errors; security coverage is incomplete.")
+        if success and settings.get("PROOFPORT_SECURITY_FIXTURES"):
+            from backend.security.engine import SecurityFixEngine
+            from backend.security.providers import OfflineFixtureGenerator
+            _write(workspace / "security_pre_fixes.json", after)
+            generator = OfflineFixtureGenerator(_setting_path(root, settings, "PROOFPORT_SECURITY_FIXTURES"))
+            security = SecurityFixEngine(
+                runner=runner, working=migrated, original=run.source,
+                original_hashes={key.split("/", 1)[1]: value for key, value in run.originals.items()},
+                artifacts=workspace / "security_attempts", cases=cases, golden=golden,
+                existing_tests=legacy_tests, evidence=run.evidence,
+            ).run(generator)
+            run.verification["security_fix"] = security
+            if security["status"] != "verified":
+                raise PipelineFailure("security_verification_failed", "Offline security verification failed; no unverified fix is accepted.")
+            after = security["scan_after"]
+            run.verification["security_after"] = after
+            _write(workspace / "security_after.json", after)
+            state.security.before = len(security["findings_before"])
+            state.security.after = len(security["findings_after"])
+            details = list(security["findings_after"])
+            live_ids = {finding["id"] for finding in details}
+            details.extend(finding for finding in security["decisions"] if finding["id"] not in live_ids)
+            run.verification["security_details"] = details
+            from backend.core.models import Finding
+            state.security.findings = [Finding.model_validate({key: finding[key] for key in Finding.model_fields}) for finding in details]
+            run.verification["comparisons"] = security["final_checks"]["golden"]["comparisons"]
+            run.verification["target_tests"] = {key: value for key, value in security["final_checks"]["existing_tests"].items() if key not in {"ran", "passed"}}
+            run.verification["limitations"] = [note for note in run.verification["limitations"] if not note.startswith("No automatic security fixes")]
+            run.verification["limitations"].append("Security decisions use offline fixtures and real Docker checks, not Meta AI. Behavior/configuration/crypto changes require review; a clean scan is not full security.")
         if not success:
             raise PipelineFailure("verification_failed", "Candidate did not pass all compilation, golden, test suite, and scanner checks. No complete migration is claimed.")
         state.status = "done"

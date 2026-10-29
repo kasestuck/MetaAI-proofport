@@ -11,7 +11,7 @@ def report_data(run: Run) -> dict:
     notice = (
         f"REAL Docker execution; provider={run.execution_mode}; status={run.state.status}. "
         "Fixture candidates are not AI migration. Verification covers only the recorded inputs and existing tests. "
-        "Potential security findings are not automatically fixed; zero findings would not prove complete safety."
+        "Security decisions require recorded behavior checks and policy review; zero scanner findings would not prove complete safety."
         if real else (
             "SIMULATED migration, tests, security fixes, tokens and costs. File hashes and evidence chain are real. No source was executed or modified."
             if run.simulation else "STATIC INVENTORY ONLY. Dynamic verification and security scanning did not run. No migration was performed or verified. Zero findings means not scanned, not secure. No source was executed or modified."
@@ -26,6 +26,37 @@ def report_data(run: Run) -> dict:
         "verification": run.verification,
         "events": run.evidence.since(0),
     }
+
+
+def _security_html(security):
+    if not security:
+        return ""
+    def table(findings):
+        rows = "".join(
+            "<tr>" + "".join(f"<td>{escape(str(value))}</td>" for value in (
+                finding["id"], finding["file"] + ":" + str(finding["line"]),
+                "CWE-" + str(finding["cwe"]["id"]) if finding.get("cwe") else "Unknown",
+                finding["severity"], finding["confidence"], finding["status"], finding["description"], finding["proposed_fix"],
+            )) + "</tr>" for finding in findings
+        )
+        return '<table><tr><th>ID</th><th>Location</th><th>CWE</th><th>Severity</th><th>Confidence</th><th>Status</th><th>Potential issue</th><th>Recommendation</th></tr>' + rows + '</table>'
+    attempts = "".join(
+        f'<article><h3>{escape(attempt["finding_id"])}: {escape(attempt["status"])}</h3>'
+        f'<p>{escape(attempt["explanation"])}</p><p>Applied: {attempt["applied"]}; rolled back: {attempt["rolled_back"]}</p>'
+        f'<p>{escape(" ".join(attempt["reasons"]))}</p>'
+        f'<h4>Code changes (redacted)</h4><pre>{escape(attempt["diff"])}</pre>'
+        f'<h4>Real checks / skipped-stage reasons</h4><pre>{escape(json.dumps(attempt.get("checks", {}), indent=2))}</pre></article>'
+        for attempt in security["attempts"]
+    )
+    return (
+        f'<section><h2>Security verification ({escape(security["mode"])})</h2>'
+        '<p>Offline fixtures, not Meta AI. Scanner warnings are potential risks. Verified means the accepted project passed recorded tests; it does not mean every proposal was accepted or the project is fully secure.</p>'
+        f'<p>Fixed: {len(security["fixed"])}; needs review: {len(security["needs_review"])}; rejected proposals: {len(security["rejected"])}</p>'
+        f'<h3>Findings before fixes</h3>{table(security["findings_before"])}'
+        f'<h3>Findings after fixes</h3>{table(security["findings_after"])}'
+        f'<h3>Decisions, including resolved findings</h3>{table(security["decisions"])}'
+        f'<h3>Attempts and evidence</h3>{attempts}</section>'
+    )
 
 
 def render_html(data: dict) -> str:
@@ -48,5 +79,6 @@ def render_html(data: dict) -> str:
         f'<p>Status: {state["status"]}. Isolation: {state["isolation"]}. '
         f'Chain intact: {state["chain_intact"]}. Originals unchanged: {state["hashes"]["unchanged"]}.</p>'
         f'<table><tr><th>Module</th><th>Status</th><th>Iterations</th><th>{tests_label}</th></tr>'
-        f'{modules}</table><h2>Full evidence and metrics</h2><pre>{payload}</pre></html>'
+        f'{modules}</table>{_security_html(data.get("verification", {}).get("security_fix"))}'
+        f'<h2>Full evidence and metrics</h2><pre>{payload}</pre></html>'
     )

@@ -1,0 +1,16 @@
+{
+  "mode": "fixture",
+  "not_ai": true,
+  "proposals": [
+    {
+      "scanner_test": "B603",
+      "file": "commands.py",
+      "scope": "constant_output",
+      "source_sha256": "647725368cfd349417ecd6bdf622fcda7638fb225457c84a46c87ff03c5a3bcd",
+      "explanation": "Offline contextual triage: constant absolute argv and shell=False. No user input reaches this process. The scanner advisory remains visible; no generic dismissal of subprocess warnings.",
+      "behavior_impact": "preserves",
+      "confidence": 1.0,
+      "disposition": "false_positive"
+    }
+  ]
+}

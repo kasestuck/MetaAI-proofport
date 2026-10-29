@@ -76,3 +76,21 @@ def test_invalid_runtime_settings_do_not_leave_a_busy_run(project, monkeypatch):
         assert state["status"] == "failed"
         assert state["error"]["code"] == "invalid_settings"
         assert client.app.state.runs.active is None
+
+
+@pytest.mark.parametrize("mode", ["live", "replay"])
+def test_security_fixtures_cannot_enable_paid_migration(project, monkeypatch, mode):
+    monkeypatch.setenv("PROOFPORT_SECURITY_FIXTURES", "unused.json")
+    monkeypatch.setenv("PROOFPORT_PIPELINE", "verify")
+    monkeypatch.setenv("LLM_MODE", mode)
+    monkeypatch.setenv("MODEL_API_KEY", "offline-test-placeholder")
+    monkeypatch.setenv("MODEL_NAME", "unused-model")
+    monkeypatch.setattr("backend.api.main.docker_available", lambda: False)
+    def forbidden(*args, **kwargs):
+        pytest.fail("Offline security mode must not create an SDK client")
+    monkeypatch.setattr("backend.llm.client.OpenAI", forbidden)
+    with TestClient(create_app(project)) as client:
+        response = client.post("/api/runs", json={"source_path": "samples/legacy_shop"})
+        assert response.status_code == 503
+        assert response.json()["error"]["code"] == "offline_only"
+        assert not client.app.state.runs.runs

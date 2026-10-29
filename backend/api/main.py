@@ -71,6 +71,8 @@ def create_app(root: Path = ROOT, step_seconds: float = 0.2) -> FastAPI:
 
     @app.post("/api/runs")
     async def start_run(body: StartRun):
+        if settings.get("PROOFPORT_SECURITY_FIXTURES") and (pipeline != "fixtures" or mode != "mock"):
+            raise RunError(503, "offline_only", "Security fixture verification requires PROOFPORT_PIPELINE=fixtures and LLM_MODE=mock. No paid API request is permitted in this stage.")
         if pipeline in {"simulation", "fixtures"} and mode != "mock":
             raise RunError(503, "pipeline_unavailable", "Simulation/fixtures require LLM_MODE=mock and cannot stand in for live or replay model calls.")
         return {"run_id": store.start(body.source_path, body.max_iterations)}

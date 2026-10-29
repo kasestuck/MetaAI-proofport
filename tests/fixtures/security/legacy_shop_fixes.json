@@ -1,0 +1,75 @@
+{
+  "mode": "fixture",
+  "not_ai": true,
+  "proposals": [
+    {
+      "scanner_test": "B307",
+      "file": "legacy_shop/config.py",
+      "scope": "_py2_eval",
+      "source_sha256": "a9dc0e47a85d220fb6e284dba698ae32842b4eb5d8521743fed9ea9cc49392d5",
+      "explanation": "Offline fixture: literal-only evaluation would remove arbitrary expression execution but rejects arithmetic and calls supported by the original configuration language. Review required; no universal safety claim for literal_eval.",
+      "behavior_impact": "changes",
+      "confidence": 0.99,
+      "review_areas": [
+        "api"
+      ],
+      "replace": [
+        [
+          "return eval(compile(tree, '<string>', 'eval'))",
+          "return ast.literal_eval(tree)"
+        ]
+      ]
+    },
+    {
+      "scanner_test": "B608",
+      "file": "legacy_shop/storage.py",
+      "scope": "find_items",
+      "source_sha256": "05656766256c9b6129b5c69687236b12fa89995d44fc6f336e24760f1faed6ec",
+      "explanation": "Offline fixture: bind query parameters. This deliberately changes the recorded injection input result, so preserving the existing contract requires a human decision.",
+      "behavior_impact": "changes",
+      "confidence": 0.99,
+      "review_areas": [
+        "api"
+      ],
+      "replace": [
+        [
+          "cur.execute(\"SELECT name, price FROM items WHERE name = '%s'\" % name)",
+          "cur.execute(\"SELECT name, price FROM items WHERE name = ?\", (name,))"
+        ]
+      ]
+    },
+    {
+      "scanner_test": "B602",
+      "file": "legacy_shop/storage.py",
+      "scope": "archive_file",
+      "source_sha256": "05656766256c9b6129b5c69687236b12fa89995d44fc6f336e24760f1faed6ec",
+      "explanation": "Offline fixture: argument list with shell=False. Normal copied files may match golden cases, but public inputs have no domain restriction; word splitting, expansion and shell metacharacters change behavior.",
+      "behavior_impact": "changes",
+      "confidence": 0.99,
+      "review_areas": [
+        "api"
+      ],
+      "replace": [
+        [
+          "subprocess.call('cp %s %s' % (path, dest), shell=True)",
+          "subprocess.call(['cp', path, dest], shell=False)"
+        ]
+      ]
+    },
+    {
+      "scanner_test": "B105",
+      "file": "legacy_shop/storage.py",
+      "scope": "<module>",
+      "source_sha256": "05656766256c9b6129b5c69687236b12fa89995d44fc6f336e24760f1faed6ec",
+      "explanation": "Offline fixture: obtain SECRET_KEY from a required environment variable. This introduces a configuration requirement and can change password-hash outputs; do not apply automatically.",
+      "behavior_impact": "changes",
+      "confidence": 0.99,
+      "review_areas": [
+        "configuration",
+        "crypto"
+      ],
+      "replace": [],
+      "environment_assignment": "SECRET_KEY"
+    }
+  ]
+}

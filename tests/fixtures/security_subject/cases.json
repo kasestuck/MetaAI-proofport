@@ -1,0 +1,8 @@
+{
+  "provenance": "Authored offline inputs. Golden outputs must come from actual Docker execution.",
+  "cases": [
+    {"id": "constant.output", "module": "commands", "steps": [{"call": "commands.constant_output"}]},
+    {"id": "add.positive", "module": "commands", "steps": [{"call": "commands.add_one", "args": [4]}]},
+    {"id": "add.negative", "module": "commands", "steps": [{"call": "commands.add_one", "args": [-1]}]}
+  ]
+}
