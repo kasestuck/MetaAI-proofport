@@ -6,10 +6,11 @@ import json
 from backend.core.runs import Run
 
 
-def report_data(run: Run) -> dict:
+def report_data(run: Run, *, status: str | None = None) -> dict:
+    reported_status = status or run.state.status
     real = bool(run.verification)
     notice = (
-        f"REAL Docker execution; provider={run.execution_mode}; status={run.state.status}. "
+        f"REAL Docker execution; provider={run.execution_mode}; status={reported_status}. "
         "Fixture candidates are not AI migration. Verification covers only the recorded inputs and existing tests. "
         "Security decisions require recorded behavior checks and policy review; zero scanner findings would not prove complete safety."
         if real else (
@@ -17,10 +18,15 @@ def report_data(run: Run) -> dict:
             if run.simulation else "STATIC INVENTORY ONLY. Dynamic verification and security scanning did not run. No migration was performed or verified. Zero findings means not scanned, not secure. No source was executed or modified."
         )
     )
+    if run.execution_mode in {"analyze", "audit", "compatibility"}:
+        level = run.verification.get("compatibility", {}).get("level", "not_verified")
+        notice = (f"Offline {run.execution_mode}; compatibility={level}; status={reported_status}. "
+                  "No migration, source modifications, remediation or model calls. Completion is not proof of project compatibility. "
+                  "Runtime self-tests certify only the shipped harness. Bandit findings are potential risks; parsing errors limit coverage.")
     return {
         "simulation": run.simulation,
         "notice": notice,
-        "state": run.state.snapshot(),
+        "state": {**run.state.snapshot(), "status": reported_status},
         "settings": {"pipeline": "simulation" if run.simulation else run.execution_mode, "model": run.verification.get("model"), "max_iterations": run.max_iterations},
         "allowed_differences": [{"case": comparison["id"], **difference} for comparison in run.verification.get("comparisons", []) for difference in comparison["allowed_differences"]],
         "verification": run.verification,
@@ -64,6 +70,15 @@ def render_html(data: dict) -> str:
     real = bool(data.get("verification"))
     title = "Proofport simulated run report" if data["simulation"] else ("Proofport Docker verification report" if real else "Proofport unverified source inventory")
     tests_label = "Simulated tests" if data["simulation"] else ("Recorded cases passed" if real else "Executed tests (unavailable)")
+    verification = data.get("verification", {})
+    universal = ""
+    if verification.get("mode") in {"analyze", "audit", "compatibility"}:
+        title = "Proofport offline " + verification["mode"] + " report"
+        universal = ('<section><h2>Compatibility evidence</h2><pre>' + escape(json.dumps({
+            "checks": verification.get("compatibility"), "version_detection": verification.get("version_detection"),
+            "limitations": verification.get("limitations"), "runtime_registry": verification.get("registry"),
+            "security_audit": verification.get("security_audit"), "findings": verification.get("security_details"),
+        }, indent=2)) + '</pre></section>')
     modules = "".join(
         f"<tr><td>{escape(m['name'])}</td><td>{m['status']}</td>"
         f"<td>{m['iterations']}</td><td>{m['tests_passed']}/{m['tests_total']}</td></tr>"
@@ -79,6 +94,6 @@ def render_html(data: dict) -> str:
         f'<p>Status: {state["status"]}. Isolation: {state["isolation"]}. '
         f'Chain intact: {state["chain_intact"]}. Originals unchanged: {state["hashes"]["unchanged"]}.</p>'
         f'<table><tr><th>Module</th><th>Status</th><th>Iterations</th><th>{tests_label}</th></tr>'
-        f'{modules}</table>{_security_html(data.get("verification", {}).get("security_fix"))}'
+        f'{modules}</table>{universal}{_security_html(data.get("verification", {}).get("security_fix"))}'
         f'<h2>Full evidence and metrics</h2><pre>{payload}</pre></html>'
     )

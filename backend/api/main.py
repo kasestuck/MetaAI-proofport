@@ -31,8 +31,8 @@ def create_app(root: Path = ROOT, step_seconds: float = 0.2) -> FastAPI:
     if mode not in {"live", "mock", "replay"}:
         raise ValueError("LLM_MODE must be live, mock, or replay.")
     pipeline = settings.get("PROOFPORT_PIPELINE", "verify")
-    if pipeline not in {"verify", "simulation", "fixtures"}:
-        raise ValueError("PROOFPORT_PIPELINE must be verify, fixtures, or simulation.")
+    if pipeline not in {"verify", "simulation", "fixtures", "analyze", "audit", "compatibility"}:
+        raise ValueError("Invalid PROOFPORT_PIPELINE mode.")
     store = RunStore(root, step_seconds, pipeline=pipeline, settings=settings)
 
     @asynccontextmanager
@@ -71,6 +71,8 @@ def create_app(root: Path = ROOT, step_seconds: float = 0.2) -> FastAPI:
 
     @app.post("/api/runs")
     async def start_run(body: StartRun):
+        if pipeline in {"verify", "fixtures"} and (settings.get("PROOFPORT_SOURCE_VERSION", "2.7") != "2.7" or settings.get("PROOFPORT_TARGET_VERSION", "3.12") != "3.12"):
+            raise RunError(400, "unsupported_migration_pair", "Migration currently supports only Python 2.7 to 3.12. Use compatibility mode to verify other configured versions.")
         if settings.get("PROOFPORT_SECURITY_FIXTURES") and (pipeline != "fixtures" or mode != "mock"):
             raise RunError(503, "offline_only", "Security fixture verification requires PROOFPORT_PIPELINE=fixtures and LLM_MODE=mock. No paid API request is permitted in this stage.")
         if pipeline in {"simulation", "fixtures"} and mode != "mock":

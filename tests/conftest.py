@@ -11,7 +11,7 @@ collect_ignore = ["fixtures"]
 
 @pytest.fixture(autouse=True)
 def clean_model_env(monkeypatch):
-    for key in ("MODEL_API_KEY", "MODEL_NAME", "MODEL_BASE_URL", "PRICE_IN_PER_MTOK", "PRICE_OUT_PER_MTOK", "PROOFPORT_CASES_FILE", "PROOFPORT_FIXTURE_FILE", "PROOFPORT_SECURITY_FIXTURES"):
+    for key in ("MODEL_API_KEY", "MODEL_NAME", "MODEL_BASE_URL", "PRICE_IN_PER_MTOK", "PRICE_OUT_PER_MTOK", "PROOFPORT_CASES_FILE", "PROOFPORT_FIXTURE_FILE", "PROOFPORT_SECURITY_FIXTURES", "PROOFPORT_SOURCE_VERSION", "PROOFPORT_TARGET_VERSION", "PROOFPORT_VERIFY_RUNTIME"):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("LLM_MODE", "mock")
     monkeypatch.setenv("PROOFPORT_PIPELINE", "simulation")

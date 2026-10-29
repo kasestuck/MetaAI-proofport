@@ -24,6 +24,8 @@ IGNORED = {".git", ".venv", "__pycache__", ".pytest_cache"}
 
 
 def source_files(source: Path) -> list[Path]:
+    if source.is_file():
+        return [source] if not source.is_symlink() else []
     return sorted(
         path for path in source.rglob("*")
         if path.is_file() and not path.is_symlink()
@@ -33,6 +35,8 @@ def source_files(source: Path) -> list[Path]:
 
 
 def hashes_for(source: Path) -> dict[str, str]:
+    if source.is_file():
+        return {source.name: sha256(source.read_bytes()).hexdigest()}
     return {
         f"{source.name}/{path.relative_to(source).as_posix()}": sha256(path.read_bytes()).hexdigest()
         for path in source_files(source)
@@ -77,7 +81,8 @@ class RunStore:
         if not source.is_absolute():
             source = self.root / source
         source = source.resolve()
-        if not source.is_dir():
+        universal = self.pipeline in {"analyze", "audit", "compatibility"}
+        if not source.is_dir() and not (universal and source.is_file() and source.suffix == ".py"):
             raise RunError(400, "source_not_found", "The source folder does not exist.")
         try:
             originals = hashes_for(source)
@@ -86,7 +91,7 @@ class RunStore:
             for path in source_files(source):
                 if path.suffix != ".py":
                     continue
-                relative = path.relative_to(source)
+                relative = Path(path.name) if source.is_file() else path.relative_to(source)
                 name = ".".join(relative.with_suffix("").parts)
                 text = path.read_text(encoding="utf-8", errors="replace")
                 modules[name] = (f"{source.name}/{relative.as_posix()}", text)
@@ -118,7 +123,7 @@ class RunStore:
         run_id = uuid4().hex
         self.runs[run_id] = run
         self.active = run_id
-        worker = self._simulate if simulation else (self._real_pipeline if self.real_enabled else self._verification_unavailable)
+        worker = self._universal_pipeline if universal else (self._simulate if simulation else (self._real_pipeline if self.real_enabled else self._verification_unavailable))
         task = asyncio.create_task(worker(run_id))
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
@@ -150,6 +155,25 @@ class RunStore:
             return
         mode = "fixtures" if self.pipeline == "fixtures" else "live"
         worker = asyncio.create_task(asyncio.to_thread(execute, run, run_id, self.root, self.settings, mode))
+        try:
+            await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            await asyncio.to_thread(run.runner.cancel)
+            await worker
+            raise
+        finally:
+            self.active = None
+
+    async def _universal_pipeline(self, run_id: str):
+        from backend.core.universal import execute
+        run = self.runs[run_id]
+        try:
+            run.runner = DockerRunner(timeout=float(self.settings.get("SANDBOX_TIMEOUT_SECONDS", "30")))
+        except (ValueError, SandboxError):
+            self._fail(run, "invalid_settings", "Invalid Docker timeout; select 0 < seconds <= 300.")
+            self.active = None
+            return
+        worker = asyncio.create_task(asyncio.to_thread(execute, run, run_id, self.root, self.settings, self.pipeline))
         try:
             await asyncio.shield(worker)
         except asyncio.CancelledError:

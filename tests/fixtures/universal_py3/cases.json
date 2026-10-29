@@ -1,0 +1,6 @@
+{
+  "cases": [
+    {"id": "numbers.add", "module": "numbers_demo", "steps": [{"call": "numbers_demo.add", "args": [2, 3]}]},
+    {"id": "numbers.divide", "module": "numbers_demo", "steps": [{"call": "numbers_demo.divide", "args": [7, 2]}]}
+  ]
+}
