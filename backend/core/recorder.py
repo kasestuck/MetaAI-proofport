@@ -1,11 +1,12 @@
 """Run the same trusted harness against legacy and candidate working copies."""
 
 import json
+import re
 
 from backend.sandbox.runner import SandboxError
 
 
-def invoke(runner, image, source, action, cases=None, evidence=None):
+def invoke(runner, image, source, action, cases=None, evidence=None, *, version=None):
     result = runner.run(image, source, ["python", "-B", "/tools/harness.py"],
                         {"action": action, **({"cases": cases} if cases is not None else {})})
     if evidence:
@@ -18,7 +19,12 @@ def invoke(runner, image, source, action, cases=None, evidence=None):
         raise SandboxError("Docker harness returned invalid JSON.") from None
     if "harness_error" in data:
         raise SandboxError("Docker harness failed: " + data["harness_error"])
-    expected = [2, 7] if image == "python:2.7" else [3, 12]
+    if version is None:
+        match = re.fullmatch(r"python:(\d+\.\d+)(?:-[a-z0-9.-]+)?", image)
+        if not match:
+            raise SandboxError("An explicit interpreter version is required for an image ID/custom tag.")
+        version = match.group(1)
+    expected = [int(part) for part in version.split(".")]
     if data.get("python", [])[:2] != expected:
         raise SandboxError("Docker image does not provide the required Python interpreter version.")
     return data
