@@ -1,5 +1,23 @@
 # Architecture audit and staged implementation plan
 
+## Offline P3 implementation: 2026-10-29
+
+Added a configured/available/verified Python runtime registry with explicit,
+image-ID-bound self-tests; conservative static version detection; a separate
+source-interpreter Python 3 analyzer; and Docker-only analysis, audit and
+compatibility workflows for directories and individual files. Existing Python
+2.7 analysis, migration and offline security-fix paths are retained. The
+public API state/request schemas and frontend are unchanged. New workflows
+are selected by backend CLI or server settings; reports carry rich results.
+
+Configured versions are 2.7 (source only), 3.8, 3.10, 3.12, 3.13 and 3.14.
+Local image presence never implies verified support. Shipped runtime checks
+are distinct from project syntax, unittest and finite golden-case evidence.
+Audit-only uses the existing Bandit image and reports parse/coverage limits.
+No new migration pair, automatic remediation, universal equivalence or Meta
+usage is claimed. See [UNIVERSAL.md](UNIVERSAL.md) for commands and limitations.
+Older P3-pending descriptions below are historical snapshots.
+
 ## Offline P2 implementation: 2026-10-29
 
 Added `security/models.py`, `security/providers.py`, `security/policy.py` and

@@ -4,6 +4,15 @@ Python 3.12, FastAPI, Docker-only Python 2.7 to Python 3.12 verification.
 Endpoint paths and state fields follow the existing shared contract. Frontend
 is untouched. See `ARCHITECTURE.md` for the staged plan and historical audit.
 
+## Offline universal Python workflows (P3)
+
+See [UNIVERSAL.md](UNIVERSAL.md) for the runtime registry, conservative version
+detection, Python 3 analysis, security audit without migration, and actual
+Docker compatibility checks. These modes do not call Meta or change source.
+Configured versions are candidates until explicit runtime checks pass; project
+compatibility requires its own test/behavior evidence. The existing HTTP
+contract and Python 2.7 -> 3.12 migration mode are preserved.
+
 ## Project and trusted images
 
 The unpacked root is `samples/legacy_shop`, containing `tests/`, `sample_data/`,
@@ -139,7 +148,8 @@ $env:PROOFPORT_DOCKER_TESTS = '1'
 .venv/Scripts/python.exe -m backend.core.readiness
 ```
 
-Enabled integration tests require the real sample and all three local images;
+Enabled integration tests require the real sample and the four local images
+(including python:3.13-slim for P3);
 missing prerequisites fail rather than producing synthetic passing results.
 Readiness exit 2 means configuration is incomplete. Exit 0 permits an attempt,
 not a claim that a provider request or migration has succeeded.
