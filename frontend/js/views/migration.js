@@ -1,8 +1,13 @@
 /*
- * Migration: start a run (POST /api/runs), pipeline phases, modules,
- * golden-case progress and verification errors.
+ * Migration: choose a demo project, see what the server will run, start a
+ * run (POST /api/runs), then follow real phases, events, modules and errors.
  *
- * The form is mounted once (so typing is never interrupted); everything
+ * What a run does is decided by the server (PROOFPORT_PIPELINE, LLM_MODE),
+ * not by this page: the API accepts only source_path and max_iterations.
+ * The operation cards are therefore informational; switching operations
+ * would need a backend API (handoff §11, "versioned start DTO").
+ *
+ * The start area is mounted once (typing is never interrupted); everything
  * below it re-renders on each store update.
  */
 (function (PP) {
@@ -12,53 +17,256 @@
   const L = PP.labels;
   const S = PP.views.shared;
 
-  let root, dynamic, form, sourceInput, iterInput, startBtn, formStatus;
+  let root, dynamic, sourceInput, iterInput, startBtn, formStatus, projectsHost, opsHost, readinessHost;
   const prevModuleStatus = new Map(); // module name -> last status, for the "turned green" highlight
   let prevRunId = null;
 
-  // ---------- Form ----------
-  function buildForm() {
+  // ---------- Static descriptions ----------
+
+  // Operations the backend can run. Exactly one is active per server start.
+  const OPERATIONS = [
+    {
+      id: "migration", title: "Migration", iconName: "migration",
+      pipelines: ["fixtures", "verify", "live", "simulation", "static_only"],
+      text: "Python 2.7 → 3.12. Records golden behavior, migrates modules, verifies them in Docker and scans the result.",
+      env: "PROOFPORT_PIPELINE=fixtures | verify | simulation",
+    },
+    {
+      id: "audit", title: "Security Audit", iconName: "security",
+      pipelines: ["audit"],
+      text: "Static Bandit scan of the project in Docker. No code changes, no project execution.",
+      env: "PROOFPORT_PIPELINE=audit",
+    },
+    {
+      id: "compatibility", title: "Compatibility Check", iconName: "compatibility",
+      pipelines: ["compatibility", "analyze"],
+      text: "Checks syntax, existing tests and recorded behavior on a target Python version. Code is not translated.",
+      env: "PROOFPORT_PIPELINE=compatibility (+ PROOFPORT_TARGET_VERSION)",
+    },
+  ];
+
+  // Demo projects that exist in this repository (paths relative to the repo root).
+  const PROJECTS = [
+    { path: "samples/legacy_shop", name: "legacy_shop", lang: "Python 2.7",
+      text: "Small legacy shop package with 10 existing unittest tests and 90 golden cases.",
+      fits: ["Migration", "Security Audit"] },
+    { path: "tests/fixtures/universal_py3", name: "universal_py3", lang: "Python 3",
+      text: "Deterministic arithmetic module with 2 tests and recorded cases.",
+      fits: ["Compatibility Check"] },
+    { path: "tests/fixtures/security_subject", name: "security_subject", lang: "Python 3",
+      text: "Command-execution module used to demonstrate verified security hardening.",
+      fits: ["Security fixtures"] },
+  ];
+
+  // Codes that mean "the server is not configured for this", not "your project is broken".
+  const CONFIG_ERRORS = {
+    pipeline_unavailable: {
+      title: "The server is not configured for this run",
+      what: "The backend's current pipeline needs inputs that are not set. In the default verify pipeline that means golden cases (PROOFPORT_CASES_FILE) and a live translator; with LLM_MODE=mock nothing is translated.",
+      fix: ["For an offline demo set PROOFPORT_PIPELINE=simulation (no Docker work) or fixtures with the legacy_shop cases and patches files.", "Restart the backend after changing .env."],
+    },
+    docker_unavailable: {
+      title: "Docker is not available to the backend",
+      what: "Real verification runs only inside Docker. There is no host-execution fallback.",
+      fix: ["Start Docker Desktop.", "Restart the backend so it re-detects Docker."],
+    },
+    model_unavailable: {
+      title: "The Meta model is not configured",
+      what: "The live pipeline needs a Meta API key and model. No demonstration result is substituted.",
+      fix: ["Use an offline pipeline (simulation or fixtures) for demos.", "Live mode can send paid requests; enable it deliberately."],
+    },
+    offline_only: {
+      title: "Security fixtures need the offline fixtures pipeline",
+      what: "PROOFPORT_SECURITY_FIXTURES works only with PROOFPORT_PIPELINE=fixtures and LLM_MODE=mock.",
+      fix: ["Remove PROOFPORT_SECURITY_FIXTURES or switch to the fixtures pipeline, then restart."],
+    },
+    unsupported_migration_pair: {
+      title: "Unsupported migration pair",
+      what: "Migration supports only Python 2.7 → 3.12.",
+      fix: ["Use the compatibility pipeline to check other versions."],
+    },
+    runtime_unavailable: {
+      title: "Required Python image is missing",
+      what: "The Docker image for the selected Python version is not installed. Images are never pulled automatically.",
+      fix: ["An operator must install the image and restart."],
+    },
+    unverified_version: {
+      title: "Python runtime not verified",
+      what: "The image exists but has not passed the backend's runtime self-tests.",
+      fix: ["Run with PROOFPORT_VERIFY_RUNTIME=1 once (see backend/UNIVERSAL.md)."],
+    },
+    source_version_ambiguous: {
+      title: "Source Python version is ambiguous",
+      what: "The backend could not determine one source version for this project.",
+      fix: ["Set PROOFPORT_SOURCE_VERSION on the server and restart."],
+    },
+    invalid_settings: {
+      title: "Invalid server settings",
+      what: "A server setting (for example SANDBOX_TIMEOUT_SECONDS) is out of range.",
+      fix: ["Fix the value in .env and restart."],
+    },
+  };
+
+  // Six visual steps. Backend phases are free-form strings; "Verify" has no
+  // phase of its own and is marked only by real test events.
+  const STEPS = [
+    { id: "analyze", label: "Analyze", phase: "analyzing", events: ["run_started", "hashes_recorded"], desc: "Inventory, hashes, static analysis" },
+    { id: "record", label: "Record", phase: "recording", events: ["golden_recorded"], desc: "Golden behavior on the source Python" },
+    { id: "migrate", label: "Migrate", phase: "migrating", events: ["patch_applied", "model_call"], desc: "Candidate code for the target" },
+    { id: "verify", label: "Verify", phase: null, events: ["test_result"], desc: "Compile, tests, golden comparison" },
+    { id: "security", label: "Security", phase: "security", events: ["security_finding", "security_fix", "fix_reverted"], desc: "Scanner warnings and fix decisions" },
+    { id: "report", label: "Report", phase: "reporting", events: ["run_finished"], desc: "Hashes rechecked, report written" },
+  ];
+
+  /** Server pipeline as far as it is known: final report > operator declaration > unknown. */
+  function knownPipeline(run) {
+    if (run && run.report) return run.report.simulation ? "simulation" : (run.report.settings && run.report.settings.pipeline) || null;
+    return (PP.config.deployment && PP.config.deployment.pipeline) || null;
+  }
+
+  // ---------- Start area (mounted once) ----------
+
+  function selectProject(path) {
+    sourceInput.value = path;
+    sourceInput.removeAttribute("aria-invalid");
+    renderProjects();
+  }
+
+  function renderProjects() {
+    const current = sourceInput.value.trim();
+    projectsHost.replaceChildren(...PROJECTS.map((p) => {
+      const selected = current === p.path;
+      return h("button", { class: "project-card", type: "button", "aria-pressed": String(selected), onclick: () => selectProject(p.path) },
+        h("div", { class: "row-between" },
+          h("span", { class: "project-name" }, p.name),
+          h("span", { class: "project-check", "aria-hidden": "true" }, selected ? icon("check") : null)),
+        h("div", { class: "project-path" }, p.path),
+        h("div", { class: "project-text" }, p.text),
+        h("div", { class: "row", style: { gap: "6px" } }, PP.util.tag(p.lang, "muted"), p.fits.map((f) => PP.util.tag(f, "info"))));
+    }), h("div", { class: "project-custom field-hint" },
+      PROJECTS.some((p) => p.path === current) ? "Or enter another server-local path in Advanced settings."
+        : current ? h("span", null, "Custom path: ", h("code", null, current)) : "No project selected."));
+  }
+
+  function renderOperations(state) {
+    const pipeline = knownPipeline(state.run);
+    const active = OPERATIONS.find((op) => pipeline && op.pipelines.includes(pipeline));
+    opsHost.replaceChildren(...OPERATIONS.map((op) => {
+      const isActive = active === op;
+      const qualifier = { simulation: " · simulation", static_only: " · not configured" }[pipeline];
+      const status = isActive
+        ? badge("Active on server" + (qualifier || ""), qualifier ? "warn" : "ok")
+        : active ? badge("Not active on this server", "muted") : badge("Set by server", "muted");
+      return h("div", { class: "op-card", dataset: { active: String(isActive), dim: String(!!active && !isActive) } },
+        h("div", { class: "row-between" }, h("span", { class: "row", style: { gap: "8px" } }, icon(op.iconName, "op-icon"), h("strong", null, op.title)), status),
+        h("p", { class: "op-text" }, op.text),
+        h("code", { class: "op-env" }, op.env));
+    }));
+  }
+
+  function renderReadiness(state) {
+    const health = state.health;
+    const data = health.data;
+    const pipeline = knownPipeline(state.run);
+    const llm = L.llmMode(data && data.llm_mode);
+    const row = (label, value, note) => h("div", { class: "ready-row" },
+      h("span", { class: "muted" }, label), h("span", { class: "row", style: { gap: "6px", justifyContent: "flex-end" } }, value), note ? h("div", { class: "field-hint ready-note" }, note) : null);
+
+    let opText;
+    if (pipeline === "static_only") {
+      opText = badge("Migration · not configured", "warn");
+    } else if (pipeline) {
+      const p = L.provenance({ report: { simulation: pipeline === "simulation", settings: { pipeline }, verification: {}, state: {} } });
+      opText = badge(p.label.replace(/^Saved report · /, ""), p.tone);
+    } else {
+      opText = badge("Unknown until the first report", "muted");
+    }
+    readinessHost.replaceChildren(
+      row("Backend", health.status === "online" ? badge("Online", "ok") : health.status === "offline" ? badge("Offline", "err") : badge("Checking", "muted")),
+      row("Docker", !data ? badge("Unknown", "muted") : data.docker ? badge("Available", "ok") : badge("Unavailable", "err"),
+        data && !data.docker ? "Only static inventory can run; verification will fail." : null),
+      row("AI mode", data ? badge(llm.label, llm.tone) : badge("Unknown", "muted"),
+        data && data.llm_mode === "mock" ? "No Meta AI calls. Migration uses simulation or offline fixtures." : data && data.llm_mode === "live" ? "Key and model are not checked until a run." : null),
+      row("Operation", opText,
+        pipeline ? "From the latest report on this page (or config.js). It can change when the server restarts." : "The API reveals the pipeline only in a finished report."));
+  }
+
+  function buildStart() {
     sourceInput = h("input", {
       class: "input mono", id: "source-path", name: "source_path", type: "text", required: true,
       autocomplete: "off", spellcheck: "false", placeholder: "samples/legacy_shop",
       value: (PP.store.recall() || {}).source || "samples/legacy_shop",
-      "aria-describedby": "source-hint",
+      "aria-describedby": "source-hint", oninput: () => renderProjects(),
     });
     iterInput = h("input", { class: "input num", id: "max-iter", name: "max_iterations", type: "number", min: "1", step: "1", value: "5", "aria-describedby": "iter-hint" });
-    startBtn = h("button", { class: "btn btn--primary", type: "submit" }, icon("play"), "Start run");
-    formStatus = h("div", { class: "field-hint", role: "status" });
+    startBtn = h("button", { class: "btn btn--primary btn--lg", type: "submit" }, icon("play"), "Start run");
+    formStatus = h("div", { class: "form-status", role: "status" });
+    projectsHost = h("div", { class: "project-grid" });
+    opsHost = h("div", { class: "op-grid" });
+    readinessHost = h("div", { class: "ready-list" });
 
-    form = h("form", { class: "stack", novalidate: true, onsubmit: onSubmit },
-      h("div", { class: "run-form" },
-        h("label", { class: "field" },
-          h("span", { class: "field-label" }, "Source project path (on the backend machine)"),
-          sourceInput),
-        h("label", { class: "field" },
-          h("span", { class: "field-label" }, "Max iterations"),
-          iterInput),
-        startBtn),
-      h("div", { class: "presets" },
-        h("span", { class: "field-hint" }, "Repository paths:"),
-        PP.config.sourcePresets.map((p) => h("button", {
-          class: "chip-btn", type: "button", title: p.path,
-          onclick: () => { sourceInput.value = p.path; sourceInput.removeAttribute("aria-invalid"); sourceInput.focus(); },
-        }, p.label))),
-      h("div", { class: "grid grid-2" },
+    const advanced = h("details", { class: "disclosure", dataset: { key: "advanced-settings" } },
+      h("summary", null, icon("cpu", "dim"), h("strong", null, "Advanced settings"), h("span", { class: "dim", style: { fontSize: "12.5px" } }, "custom path, iterations, API and server variables")),
+      h("div", { class: "disclosure-body stack" },
+        h("div", { class: "grid grid-2" },
+          h("label", { class: "field" },
+            h("span", { class: "field-label" }, "Source path (on the backend machine)"),
+            sourceInput,
+            h("span", { class: "field-hint", id: "source-hint" }, "Relative to the repository root or absolute. Not a browser upload or Git URL.")),
+          h("label", { class: "field" },
+            h("span", { class: "field-label" }, "Max iterations"),
+            iterInput,
+            h("span", { class: "field-hint", id: "iter-hint" }, "Migration repair loop limit (integer ≥ 1). Ignored by audit and compatibility."))),
         h("div", { class: "field" },
           h("span", { class: "field-label" }, "Target Python version"),
-          h("input", { class: "input", type: "text", readonly: true, value: "Configured on the server", "aria-describedby": "target-hint" }),
-          h("span", { class: "field-hint", id: "target-hint" },
-            "The API does not accept a target version. Migration is 2.7 → 3.12; compatibility targets are set via PROOFPORT_TARGET_VERSION by the operator.")),
-        h("div", { class: "field" },
-          h("span", { class: "field-label" }, "Notes"),
-          h("span", { class: "field-hint", id: "source-hint" },
-            "A server-local path, relative to the repository root or absolute — not a browser upload or Git URL. The backend runs one job at a time."),
-          h("span", { class: "field-hint", id: "iter-hint" },
-            "max_iterations controls the migration repair loop (integer ≥ 1); P3 analyze/audit/compatibility ignore it."))),
-      formStatus);
+          h("input", { class: "input", type: "text", readonly: true, value: "Set on the server — not selectable via the API" }),
+          h("span", { class: "field-hint" }, "Migration is 2.7 → 3.12. Compatibility targets come from PROOFPORT_TARGET_VERSION.")),
+        h("div", null,
+          h("div", { class: "section-label", style: { marginBottom: "6px" } }, "Request sent by Start run"),
+          h("pre", { class: "code" }, 'POST /api/runs\n{"source_path": "<path>", "max_iterations": <n>}\n\nAny other field (mode, target_version, api_key…) is rejected with 422.')),
+        h("div", null,
+          h("div", { class: "section-label", style: { marginBottom: "6px" } }, "Server variables (.env, read at startup)"),
+          h("div", { class: "table-wrap" }, h("table", { class: "table" },
+            h("thead", null, h("tr", null, h("th", null, "Variable"), h("th", null, "Purpose"))),
+            h("tbody", null, [
+              ["LLM_MODE", "mock (no Meta calls) · live · replay (not implemented)"],
+              ["PROOFPORT_PIPELINE", "verify (default) · fixtures · simulation · analyze · audit · compatibility"],
+              ["PROOFPORT_CASES_FILE", "Golden input cases, e.g. tests/fixtures/legacy_shop/cases.json"],
+              ["PROOFPORT_FIXTURE_FILE", "Pre-written patches for the fixtures pipeline"],
+              ["PROOFPORT_SECURITY_FIXTURES", "Optional security proposals (fixtures + mock only)"],
+              ["PROOFPORT_SOURCE_VERSION / PROOFPORT_TARGET_VERSION", "Python versions for P3 operations"],
+            ].map(([k, v]) => h("tr", null, h("td", null, h("code", null, k)), h("td", { class: "muted" }, v))))))),
+        h("p", { class: "field-hint" }, "Full operator guide: backend/FRONTEND_HANDOFF.md §2 and backend/UNIVERSAL.md.")));
 
-    return card({ title: "Start a run", sub: "POST /api/runs · pipeline and LLM mode are fixed by the server configuration",
-      actions: S.replayButton("Replay saved report") }, form);
+    const form = h("form", { class: "stack", novalidate: true, onsubmit: onSubmit },
+      h("div", { class: "start-layout" },
+        h("div", { class: "stack" },
+          h("div", null,
+            h("div", { class: "step-title" }, h("span", { class: "step-num" }, "1"), "Choose a project"),
+            h("p", { class: "muted step-desc" }, "Demo projects that ship with this repository. The path is read on the backend machine.")),
+          projectsHost),
+        h("div", { class: "stack" },
+          h("div", null,
+            h("div", { class: "step-title" }, h("span", { class: "step-num" }, "2"), "Run on this server"),
+            h("p", { class: "muted step-desc" }, "The server decides the operation and AI mode at startup. This page cannot change them.")),
+          h("div", { class: "ready-card" }, readinessHost, h("div", { class: "ready-action" }, startBtn), formStatus))),
+      advanced);
+
+    renderProjects();
+    return card({ title: "Start a run", sub: "Pick a project and start. Results appear below as the backend reports them." }, form);
+  }
+
+  function buildOperations() {
+    return card({ title: "Operations", sub: "One operation is active per server start. Choosing another from this page would need a backend API that does not exist yet." }, opsHost);
+  }
+
+  function replayCard() {
+    return h("div", { class: "card replay-card" },
+      h("div", { class: "replay-icon" }, icon("file")),
+      h("div", { class: "replay-body" },
+        h("div", { class: "card-title" }, "Explore saved results safely"),
+        h("p", { class: "muted" }, "Open a report JSON downloaded earlier (Evidence → Download JSON). It is read in your browser only: nothing is executed, nothing is sent to the backend, and no AI is called. The evidence chain is re-verified locally.")),
+      S.replayButton("Replay saved report"));
   }
 
   function onSubmit(event) {
@@ -69,68 +277,116 @@
     if (!source) { sourceInput.setAttribute("aria-invalid", "true"); invalid = true; } else sourceInput.removeAttribute("aria-invalid");
     if (!Number.isInteger(iterations) || iterations < 1) { iterInput.setAttribute("aria-invalid", "true"); invalid = true; } else iterInput.removeAttribute("aria-invalid");
     if (invalid) {
-      formStatus.textContent = "Enter a source path and an integer number of iterations ≥ 1.";
+      formStatus.textContent = "Choose a project (or a valid path) and an integer number of iterations ≥ 1 in Advanced settings.";
       return;
     }
     PP.store.startRun(source, iterations);
   }
 
-  function updateForm(state) {
+  function updateStart(state) {
     const run = state.run;
     const active = run && run.origin === "live" && !run.finalized && !run.lost;
     const offline = state.health.status !== "online";
     startBtn.disabled = !!(state.starting || active || offline);
-    startBtn.replaceChildren(state.starting ? h("span", { class: "spinner" }) : icon("play"), state.starting ? "Starting…" : "Start run");
-    let msg = "";
-    if (offline) msg = "Backend offline — the run cannot be started.";
-    else if (active) msg = "A run is in progress. The backend accepts one run at a time; wait for it to finish.";
-    if (!state.startError) formStatus.textContent = msg;
-    else {
-      formStatus.replaceChildren(S.errorCallout({ code: state.startError.code, message: state.startError.message }, `Run not started (HTTP ${state.startError.status || "—"})`));
+    startBtn.replaceChildren(state.starting ? h("span", { class: "spinner" }) : icon("play"), state.starting ? "Starting…" : active ? "Run in progress" : "Start run");
+    renderReadiness(state);
+    renderOperations(state);
+    if (state.startError) {
+      formStatus.replaceChildren(errorView(state.startError, `Run not started (HTTP ${state.startError.status || "—"})`));
+    } else {
+      formStatus.textContent = offline ? "Backend offline — a run cannot be started." : active ? "The backend runs one job at a time. Follow it below." : "";
     }
+  }
+
+  // ---------- Errors ----------
+
+  /** Configuration errors get an explanation and operator steps; others the generic callout. */
+  function errorView(error, title) {
+    const cfg = error && CONFIG_ERRORS[error.code];
+    if (!cfg) return S.errorCallout(error, title);
+    return h("div", { class: "config-error", role: "alert" },
+      h("div", { class: "config-error-head" },
+        h("span", { class: "config-error-icon" }, icon("server")),
+        h("div", null,
+          h("div", { class: "config-error-title" }, cfg.title),
+          h("div", { class: "muted" }, "Server configuration — not a problem in your project. ", h("code", { class: "dim" }, error.code)))),
+      h("p", null, cfg.what),
+      h("div", null, h("div", { class: "section-label" }, "What the operator can do"), h("ol", { class: "list-steps" }, cfg.fix.map((f) => h("li", null, f)))),
+      h("details", { class: "disclosure" }, h("summary", null, "Backend message"), h("div", { class: "disclosure-body muted break" }, error.message || "—")),
+      h("div", { class: "row" }, h("span", { class: "muted" }, "Meanwhile you can"), S.replayButton("replay a saved report")));
   }
 
   // ---------- Pipeline ----------
-  // Phases can be shorter than the poll interval, so evidence events also
-  // mark a phase as reached.
-  const PHASE_BY_EVENT = { run_started: "analyzing", golden_recorded: "recording", patch_applied: "migrating", security_finding: "security", security_fix: "security", fix_reverted: "security" };
+
+  function stepStates(run) {
+    const st = run.state;
+    const terminal = st && PP.store.TERMINAL.has(st.status);
+    const counts = {};
+    for (const s of STEPS) counts[s.id] = run.events.filter((e) => s.events.includes(e.type)).length;
+    const modules = st ? st.modules : [];
+    const testing = modules.some((m) => m.status === "testing");
+
+    // Which step is running right now (only while the run is not terminal).
+    let current = null;
+    if (st && !terminal) {
+      if (st.phase === "migrating") current = testing ? "verify" : "migrate";
+      else current = (STEPS.find((s) => s.phase === st.phase) || {}).id || null;
+    }
+    // The step where a failed run stopped.
+    let failedAt = null;
+    if (terminal && st.status === "failed") {
+      failedAt = st.phase === "migrating" ? (testing || counts.verify ? "verify" : "migrate")
+        : (STEPS.find((s) => s.phase === st.phase && s.id !== "report") || {}).id || null;
+    }
+    return STEPS.map((s) => {
+      const reached = counts[s.id] > 0 || (s.phase && run.phasesSeen.includes(s.phase));
+      let state = "pending";
+      let text = "Waiting";
+      if (s.id === current) { state = "active"; text = "In progress"; }
+      else if (failedAt === s.id) { state = "failed"; text = "Failed here"; }
+      else if (reached) { state = "done"; text = s.id === "report" && st && st.status === "failed" ? "Failure recorded" : "Done"; }
+      else if (terminal) { state = "skipped"; text = "Not observed"; }
+      return Object.assign({}, s, { state, text, count: counts[s.id] });
+    });
+  }
 
   function pipelineCard(run) {
     const st = run.state;
-    const seen = run.phasesSeen.slice();
-    for (const e of run.events) {
-      const phase = PHASE_BY_EVENT[e.type];
-      if (phase && !seen.includes(phase)) seen.push(phase);
-    }
     const terminal = st && PP.store.TERMINAL.has(st.status);
-    const steps = L.PHASES.slice();
-    if (st && st.phase && !steps.some((p) => p.id === st.phase)) steps.push({ id: st.phase, label: st.phase }); // unknown phase: neutral
-    const items = steps.map((p, i) => {
-      let s = "pending";
-      let text = "Not reached";
-      if (st && st.phase === p.id && !terminal) { s = "active"; text = "In progress"; }
-      else if (seen.includes(p.id)) { s = "done"; text = "Reached"; }
-      if (terminal && st.phase === p.id) {
-        s = st.status === "failed" ? "failed" : "done";
-        text = st.status === "failed" ? "Run failed here" : "Completed";
-      } else if (terminal && !seen.includes(p.id)) { s = "skipped"; text = "Not observed"; }
-      return h("div", { class: "step", dataset: { state: s } },
-        h("div", { class: "step-index" }, String(i + 1).padStart(2, "0")),
-        h("div", { class: "step-name" }, p.label),
-        h("div", { class: "step-state" }, s === "active" ? h("span", { class: "spinner", style: { width: "10px", height: "10px" } }) : null, text));
-    });
-    const running = st && !terminal;
-    return card({ title: "Pipeline", sub: "Phase is a free-form backend string; order varies by pipeline. Progress is not time-based.",
+    const items = stepStates(run).map((s, i) => h("div", { class: "step", dataset: { state: s.state } },
+      h("div", { class: "row-between" },
+        h("span", { class: "step-index" }, String(i + 1).padStart(2, "0")),
+        s.count ? h("span", { class: "step-count", title: "Evidence events recorded for this step" }, s.count + " ev") : null),
+      h("div", { class: "step-name" }, s.label),
+      h("div", { class: "flow-desc" }, s.desc),
+      h("div", { class: "step-state" }, s.state === "active" ? h("span", { class: "spinner", style: { width: "10px", height: "10px" } }) : null, s.text)));
+
+    const recent = run.events.slice(-6).reverse();
+    return card({ title: "Pipeline", sub: "Steps light up only from the backend's reported phase and recorded evidence events — no estimated progress.",
       actions: st ? [S.statusBadge(st.status, true), S.provenanceBadge(run)] : null },
-      h("div", { class: "stack" },
-        h("div", { class: "stepper", style: { "--steps": String(steps.length) } }, items),
-        running ? indeterminate("Run in progress") : null,
-        h("p", { class: "dim", style: { fontSize: "12px" } }, run.origin === "replay"
-          ? "Replay: phases are inferred from the final phase and recorded events."
-          : "Reached phases come from polled snapshots and evidence events; very short phases may be “not observed”.")));
+    h("div", { class: "stack" },
+      h("div", { class: "stepper stepper--flow", style: { "--steps": String(STEPS.length) } }, items),
+      st && !terminal ? h("div", { class: "row muted", style: { fontSize: "12.5px" } },
+        h("span", { class: "spinner" }), "Backend phase: ", h("code", null, String(st.phase || "—")), h("span", { class: "dim" }, `· ${fmt.seconds(st.metrics.seconds)} elapsed`)) : null,
+      st && !terminal ? indeterminate("Run in progress") : null,
+      recent.length ? h("div", null,
+        h("div", { class: "row-between", style: { marginBottom: "6px" } },
+          h("span", { class: "section-label" }, "Latest events"),
+          h("a", { href: "#/evidence", class: "field-hint" }, "Full timeline →")),
+        h("ul", { class: "list-plain event-feed" }, recent.map((e) => {
+          const t = L.eventType(e.type);
+          return h("li", { class: "event-line" },
+            h("span", { class: "tl-type", dataset: { tone: t.tone } }, h("span", { class: "tl-dot" }), h("code", null, String(e.type))),
+            e.module ? h("span", { class: "mono dim nowrap" }, String(e.module)) : null,
+            h("span", { class: "muted event-detail" }, String(e.detail || "")));
+        }))) : null,
+      h("p", { class: "dim", style: { fontSize: "12px" } }, run.origin === "replay"
+        ? "Replay: steps are inferred from the final phase and recorded events."
+        : "Short phases can finish between polls; they are still marked from their evidence events. “Verify” has no backend phase and is shown only from test events.")));
   }
 
   // ---------- Modules ----------
+
   function modulesCard(run) {
     const st = run.state;
     const modules = st ? st.modules : [];
@@ -159,14 +415,15 @@
     return card({ title: "Modules", titleExtra: simulated ? PP.util.tag("Simulated") : null, flush: true,
       sub: "Per-module golden cases (tests_passed / tests_total). Green follows the worker's rules — read provenance before concluding.",
       actions: h("div", { class: "row" }, Object.keys(counts).map((k) => badge(counts[k] + " " + L.moduleStatus(k).label.toLowerCase(), L.moduleStatus(k).tone))) },
-      modules.length
-        ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
-          h("thead", null, h("tr", null, h("th", null, "Module"), h("th", null, "Status"), h("th", { class: "col-num" }, "Iterations"), h("th", null, "Golden cases"))),
-          h("tbody", null, rows)))
-        : PP.util.empty("box", "No modules", st ? "The run reported no modules." : "Waiting for the first state snapshot…"));
+    modules.length
+      ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
+        h("thead", null, h("tr", null, h("th", null, "Module"), h("th", null, "Status"), h("th", { class: "col-num" }, "Iterations"), h("th", null, "Golden cases"))),
+        h("tbody", null, rows)))
+      : PP.util.empty("box", "No modules", st ? "The run reported no modules." : "Waiting for the first state snapshot…"));
   }
 
   // ---------- Golden cases & checks ----------
+
   function casesCard(run) {
     const st = run.state;
     const v = run.report ? run.report.verification || {} : null;
@@ -195,7 +452,8 @@
         ]) : S.reportPending(run, "Golden case counts, legacy/target test runs and comparisons arrive with the final report")));
   }
 
-  // ---------- Errors ----------
+  // ---------- Errors & limitations ----------
+
   function issuesCard(run) {
     const st = run.state;
     const v = run.report ? run.report.verification || {} : {};
@@ -203,7 +461,7 @@
     const failedTests = v.target_tests && Array.isArray(v.target_tests.outcomes) ? v.target_tests.outcomes.filter((o) => o.status === "failed" || o.status === "error") : [];
     const limits = v.limitations;
     const blocks = [];
-    if (st && st.error) blocks.push(S.errorCallout(st.error));
+    if (st && st.error) blocks.push(errorView(st.error));
     if (st && st.status === "done" && run.report && st.hashes && st.hashes.unchanged !== true) {
       blocks.push(h("div", { class: "callout callout--warn" }, "Originals unchanged is not confirmed — no success verdict."));
     }
@@ -238,12 +496,32 @@
     return card({ title: "Verification errors & limitations" }, h("div", { class: "stack" }, blocks));
   }
 
+  // ---------- Empty state ----------
+
+  function emptyState() {
+    const step = (n, title, text) => h("div", { class: "how-step" },
+      h("span", { class: "step-num" }, String(n)),
+      h("div", null, h("div", { class: "how-title" }, title), h("div", { class: "muted" }, text)));
+    return card({ class: "empty-run" },
+      h("div", { class: "empty-run-head" },
+        icon("migration", "empty-run-icon"),
+        h("div", null,
+          h("div", { class: "empty-title" }, "No run yet"),
+          h("p", { class: "muted" }, "Nothing has been started from this browser. Here is what happens when you press Start run:"))),
+      h("div", { class: "how-grid" },
+        step(1, "You choose a project", "A folder that exists on the backend machine, e.g. samples/legacy_shop."),
+        step(2, "The server picks the operation", "Migration, audit or compatibility — and Mock or Live AI — from its startup configuration."),
+        step(3, "Work runs in Docker", "Originals are hashed and never modified. Every step is written to a hash-chained evidence log."),
+        step(4, "You get a report", "Phases, modules, findings and evidence appear here; HTML/JSON exports in Evidence.")),
+      h("div", { class: "row", style: { marginTop: "4px" } },
+        h("span", { class: "muted" }, "No server set up for runs?"), S.replayButton("Replay a saved report instead")));
+  }
+
   function render(state) {
-    updateForm(state);
+    updateStart(state);
     const run = state.run;
     if (!run) {
-      dynamic.replaceChildren(card({}, PP.util.empty("migration", "No run yet",
-        "Enter a server-local source path above and start a run. What the run does (simulation, offline fixtures, live verification or a P3 check) depends on the server configuration.")));
+      dynamic.replaceChildren(emptyState());
       return;
     }
     dynamic.replaceChildren(
@@ -255,11 +533,12 @@
 
   PP.views.migration = {
     title: "Migration",
-    sub: "Run the server-configured pipeline and follow modules, iterations and golden cases",
+    sub: "Pick a project, start the server-configured run and follow real progress",
     mount(el) {
       root = el;
       dynamic = h("div", { class: "stack-lg" });
-      root.replaceChildren(h("div", { class: "stack-lg" }, buildForm(), dynamic));
+      // Order: start → live run (or empty state) → operations → replay.
+      root.replaceChildren(h("div", { class: "stack-lg" }, buildStart(), dynamic, buildOperations(), replayCard()));
     },
     update: render,
   };

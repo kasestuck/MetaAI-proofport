@@ -36,13 +36,7 @@ window.PP.config = {
     pipeline: null,
   },
 
-  // Server-local source folders that exist in this repository. Shown as
-  // shortcuts only; the user can type any path that exists on the backend host.
-  sourcePresets: [
-    { path: "samples/legacy_shop", label: "legacy_shop (Py 2.7 sample)" },
-    { path: "tests/fixtures/universal_py3", label: "universal_py3" },
-    { path: "tests/fixtures/security_subject", label: "security_subject" },
-  ],
+  // Demo project cards are defined in js/views/migration.js (PROJECTS).
 
   storageKey: "proofport.console.lastRun",
 };

@@ -88,6 +88,26 @@ without a backend change (see handoff §11).
 - Untrusted backend text (paths, scanner output, diffs, events) is rendered
   only via `textContent`.
 
+## Migration page
+
+- **Choose a project**: cards for the three repository demo projects
+  (`PROJECTS` in `js/views/migration.js`); any other server-local path goes
+  in *Advanced settings* together with `max_iterations`, the request shape and
+  the server variables.
+- **Run on this server**: readiness from health (backend, Docker, AI mode) and
+  the operation, which is known only from a finished report or
+  `config.deployment.pipeline`.
+- **Operations** (Migration / Security Audit / Compatibility Check) are
+  informational: the active one is highlighted, the others say they are not
+  active. Switching would need a backend start DTO that does not exist.
+- **Pipeline** Analyze → Record → Migrate → Verify → Security → Report. A step
+  is marked only from the reported `phase` or recorded evidence events
+  (`Verify` has no backend phase: test events only). Each step shows its event
+  count; the six latest events are listed below it.
+- Configuration error codes (`pipeline_unavailable`, `docker_unavailable`,
+  `model_unavailable`, …) render as "server configuration" cards with operator
+  steps instead of a generic failure.
+
 ## Known limitations (API, not UI)
 
 - Pipeline, target Python and fixtures cannot be chosen per run; the target
