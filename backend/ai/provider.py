@@ -1,0 +1,153 @@
+"""LLMClient boundary shared by adapters. No public or implicit live activation."""
+
+import base64
+from dataclasses import asdict
+from hashlib import sha256
+import json
+from pathlib import PurePosixPath
+import re
+
+from backend.ai.models import ModelPatch
+from backend.ai.prompts import PYTHON, PHP, SECURITY, BOUNDARY
+from backend.llm.client import LLMClient, ModelUnavailable, _unique_json_keys, _invalid_json_constant
+from backend.llm.budget import LLMLimits
+
+
+class PrivateContext:
+    def __init__(self, credential=""):
+        self.credential = credential
+        self.values = {}
+
+    def protect(self, source):
+        if not isinstance(source, str) or not source or len(source.encode()) > 262144:
+            raise ModelUnavailable("Source context is absent or too large.", "model_context_invalid")
+        if self.credential and self.credential in source:
+            raise ModelUnavailable("Model credential detected in project context; no request sent.", "credential_in_prompt")
+        pattern = r'''(?i)\b\w*(?:password|secret|api_key|token)\w*\b[^\r\n=]{0,20}=\s*(['"])((?:\\.|(?!\1)[^\r\n])*?)\1'''
+        for match in re.finditer(pattern, source):
+            value = match.group(2)
+            if value and len(value) < 8:
+                raise ModelUnavailable("Ambiguous short private literal requires manual context preparation.", "needs_review")
+            if value and value not in self.values:
+                self.values[value] = "__PROOFPORT_PRIVATE_%d__" % (len(self.values) + 1)
+        return self.clean(source, placeholders=True)
+
+    def clean(self, value, *, placeholders=False):
+        if isinstance(value, str):
+            for secret, marker in sorted(self.values.items(), key=lambda item: -len(item[0])):
+                for form in (secret, json.dumps(secret)[1:-1], base64.b64encode(secret.encode()).decode()):
+                    value = value.replace(form, marker if placeholders else "[REDACTED]")
+            if self.credential:
+                for form in (self.credential, json.dumps(self.credential)[1:-1], base64.b64encode(self.credential.encode()).decode()):
+                    value = value.replace(form, "[REDACTED]")
+            return value
+        if isinstance(value, list): return [self.clean(x, placeholders=placeholders) for x in value]
+        if isinstance(value, dict): return {k:self.clean(v, placeholders=placeholders) for k,v in value.items()}
+        return value
+
+    def restore(self, code, original, task):
+        known = set(self.values.values())
+        if any(marker not in known for marker in re.findall(r"__PROOFPORT_PRIVATE_\w+__", code)):
+            raise ModelUnavailable("Unknown private-context placeholder.", "model_response_invalid")
+        for secret, marker in self.values.items():
+            if task == "translate" and code.count(marker) != self.clean(original, placeholders=True).count(marker):
+                raise ModelUnavailable("Translation changed private-context bindings; manual review required.", "model_response_invalid")
+            count = code.count(marker)
+            if len(code.encode()) + count * (len(secret.encode()) - len(marker.encode())) > 262144:
+                raise ModelUnavailable("Restored candidate exceeds the bounded file size.", "model_response_invalid")
+            code = code.replace(marker, secret)
+        return code
+
+
+class ModelSession:
+    def __init__(self, client, language, *, evidence=None):
+        if not isinstance(client, LLMClient) or language not in {"python", "php"}:
+            raise ModelUnavailable("Supply an explicit LLMClient and supported language.")
+        # This one gate must be reviewed after separately authorized real smoke
+        # and per-call approval. No env var/API request can activate it today.
+        if client.mode not in {"mock", "replay"}:
+            raise ModelUnavailable("AI pipeline live execution remains disabled pending real smoke and separate authorization.", "live_disabled")
+        if not isinstance(client.limits, LLMLimits):
+            raise ModelUnavailable("AI orchestration requires a bounded per-run LLM client.", "budget_required")
+        self.client, self.language, self.evidence = client, language, evidence
+        self.mode = client.mode
+        self.stopped = False
+        self.private = PrivateContext(client._api_key)
+        self.responses = []
+
+    def request(self, task, file, source, *, previous=None, failures=None, finding=None):
+        if self.stopped: raise ModelUnavailable("Model response session stopped; no automatic retry.", "model_session_stopped")
+        if self.client.mode != self.mode or self.client.mode not in {"mock", "replay"}:
+            raise ModelUnavailable("Live/session mode switch is not authorized.", "live_disabled")
+        path = PurePosixPath(file)
+        suffix = ".php" if self.language == "php" else ".py"
+        if (not isinstance(file, str) or path.is_absolute() or "\\" in file or ":" in file
+            or any(p in {"", ".", "..", "tests", "vendor"} or p.startswith(".") for p in file.split("/"))
+            or path.name.startswith("test_") or path.suffix != suffix):
+            raise ModelUnavailable("Model target must be a single application source file.", "model_target_invalid")
+        if task not in {"translate", "security"} or (task == "security" and not finding):
+            raise ModelUnavailable("Invalid model task binding.", "model_context_invalid")
+        binding = {"task":task, "language":self.language, "file":file, "source_sha256":sha256(source.encode()).hexdigest(),
+                   "finding_id":finding["id"] if finding else None}
+        redacted = self.private.protect(source)
+        context = {**binding, "source_version":"2.7" if self.language == "python" else "7.4", "target_version":"3.12" if self.language == "python" else "8.3",
+                   "source":redacted, "previous": self.private.protect(previous) if previous else None,
+                   "failures": self.private.clean(failures), "schema":ModelPatch.model_json_schema()}
+        if finding:
+            context["finding"] = self.private.clean({k:finding[k] for k in ("id","file","line","scope","scanner_test","cwe","severity","confidence","description") if k in finding})
+        system = (SECURITY if task == "security" else PYTHON if self.language == "python" else PHP) + "\n" + BOUNDARY
+        count = len(self.client.attempts)
+        try:
+            text = self.client.complete(system, json.dumps(context, sort_keys=True, ensure_ascii=True), json_mode=True)
+            data = json.loads(text, object_pairs_hook=_unique_json_keys, parse_constant=_invalid_json_constant)
+            if self.private.clean(data, placeholders=True) != data:
+                raise ModelUnavailable("Sensitive model response withheld.", "model_sensitive_response")
+            patch = ModelPatch.model_validate(data)
+            if any(getattr(patch,k) != v for k,v in binding.items()):
+                raise ModelUnavailable("Response binding differs from request.", "model_response_invalid")
+            code = self.private.restore(patch.proposed_code, source, task)
+            metadata = {**binding, "mode":self.client.mode, "explanation":patch.explanation,
+                        "behavior_impact":patch.behavior_impact, "confidence":patch.confidence,
+                        "review_areas":patch.review_areas, "proposed_sha256":sha256(code.encode()).hexdigest()}
+            self.responses.append(self.private.clean(metadata))
+            return patch.model_copy(update={"proposed_code":code})
+        except ModelUnavailable:
+            self.stopped = True
+            raise
+        except Exception:
+            self.stopped = True
+            raise ModelUnavailable("Invalid structured model response; no candidate/fallback accepted.", "model_response_invalid") from None
+        finally:
+            if self.evidence:
+                for attempt in self.client.attempts[count:]:
+                    self.evidence.append("model_response", json.dumps({**asdict(attempt), "mode":self.client.mode, "provider_called":False}, sort_keys=True))
+
+
+def failure_summary(checks):
+    """Only check status/IDs/locations, never golden answers or raw source errors."""
+    result = {}
+    for stage in ("syntax", "golden", "existing_tests"):
+        check = checks.get(stage, {})
+        result[stage] = {"ran":check.get("ran"), "passed":check.get("passed")}
+    result["mismatched_cases"] = [c["id"] for c in checks.get("golden", {}).get("comparisons", []) if not c.get("matches")][:64]
+    result["failed_tests"] = [c["id"] for c in checks.get("existing_tests", {}).get("outcomes", []) if c.get("status") != "passed"][:128]
+    return result
+
+
+class StructuredTranslator:
+    def __init__(self, session):
+        self.session, self.client = session, session.client
+        self.mode = "model_" + self.client.mode
+
+    def translate(self, relative, source, previous=None, failures=None):
+        # Existing Python feedback has richer/raw observations. Reduce it at
+        # this boundary as well; the model never receives expected answers.
+        if failures and (not isinstance(failures, dict) or not {"syntax","golden","existing_tests"} <= set(failures)):
+            failures = {"verification_failed": True, "repair_requested": True}
+        patch = self.session.request("translate", relative, source, previous=previous, failures=failures)
+        if patch.behavior_impact != "preserves" or patch.review_areas:
+            raise ModelUnavailable("Translation declares semantic/API/configuration changes; needs_review.", "needs_review")
+        return patch.proposed_code
+
+    def close(self):
+        self.client.close()

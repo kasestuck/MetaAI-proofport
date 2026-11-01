@@ -41,12 +41,24 @@ class CallUsage:
 
 class LLMClient:
     def __init__(self, env_file: str | Path | None = None, *, allow_live=False,
-                 limits: LLMLimits | None = None, http_client=None):
+                 limits: LLMLimits | None = None, http_client=None, mode=None,
+                 replay_file=None, mock_responder=None):
         env_file = env_file or Path(__file__).resolve().parents[2] / ".env"
         settings = {**dotenv_values(env_file), **os.environ}
-        self.mode = (settings.get("LLM_MODE") or "mock").strip().lower()
-        if self.mode not in {"live", "mock"}:
-            raise ModelUnavailable("LLM_MODE must be live or mock for this milestone.")
+        self.mode = (mode if mode is not None else settings.get("LLM_MODE") or "mock").strip().lower()
+        if self.mode not in {"live", "mock", "replay"}:
+            raise ModelUnavailable("LLM_MODE must be live, mock or explicit replay.")
+        self._api_key = settings.get("MODEL_API_KEY") or ""
+        self._mock_responder = mock_responder
+        self._replay = None
+        if mock_responder is not None and (self.mode != "mock" or not callable(mock_responder)):
+            raise ModelUnavailable("A mock responder requires explicit mock mode.", "invalid_model_input")
+        if self.mode == "replay":
+            from backend.llm.replay import ReplayResponses
+            if replay_file is None: raise ModelUnavailable("Select a bound local response replay; no fallback.", "model_replay_unavailable")
+            self._replay = ReplayResponses(replay_file)
+        elif replay_file is not None:
+            raise ModelUnavailable("Replay file requires explicit replay mode.", "invalid_model_input")
         self.model = (settings.get("MODEL_NAME") or "").strip()
         self.base_url = (settings.get("MODEL_BASE_URL") or "https://api.meta.ai/v1").strip()
         self.calls: list[CallUsage] = []
@@ -138,6 +150,8 @@ class LLMClient:
             raise ModelUnavailable("Messages must be strings and json_mode a boolean.", "invalid_model_input")
         started = perf_counter()
         prompt = json.dumps([system, user, json_mode], ensure_ascii=False, separators=(",", ":"))
+        if self.mode == "replay" or self._mock_responder is not None or self.mode == "mock" and self.limits is not None:
+            return self._offline_response(system, user, json_mode, prompt, started)
         if self.mode == "mock":
             answer = (
                 '{"mode":"mock","message":"Simulated response; no model was called."}'
@@ -197,6 +211,41 @@ class LLMClient:
                 raise error from None
         self._record(prompt, tokens_in, tokens_out, started)
         return answer
+
+    def _offline_response(self, system, user, json_mode, prompt, started):
+        if not isinstance(self.limits, LLMLimits):
+            raise ModelUnavailable("Scripted model responses require explicit LLMLimits.", "budget_required")
+        limits = self.limits
+        reserved = limits.max_input_tokens + limits.max_output_tokens
+        if len(prompt.encode()) + 256 > limits.max_input_tokens:
+            raise ModelUnavailable("Input budget exceeded; no response consumed.", "input_budget_exceeded")
+        if len(self.attempts) >= limits.max_calls or self._reserved_tokens + reserved > limits.max_total_tokens:
+            raise ModelUnavailable("Offline response budget exceeded; no fallback.", "budget_exceeded")
+        fingerprint = sha256(prompt.encode()).hexdigest()
+        self._reserved_tokens += reserved
+        self.attempts.append(CallAttempt(fingerprint, reserved, 0.0))
+        try:
+            answer = self._replay.next(fingerprint) if self._replay is not None else self._mock_responder(system, user) if self._mock_responder else (
+                '{"mode":"mock","message":"Simulated response; no model was called."}' if json_mode else "Mock response: no model was called.")
+            if not isinstance(answer, str) or not answer.strip():
+                raise ModelUnavailable("No usable offline response.", "model_empty_response")
+            if len(answer.encode()) > limits.max_output_tokens:
+                raise ModelUnavailable("Offline response exceeds output allowance.", "output_budget_exceeded")
+            if self._api_key and self._api_key in answer:
+                raise ModelUnavailable("Sensitive response withheld.", "model_sensitive_response")
+            if json_mode:
+                data = json.loads(answer, object_pairs_hook=_unique_json_keys, parse_constant=_invalid_json_constant)
+                if not isinstance(data, dict): raise ValueError
+            self._record(prompt, 0, 0, started)
+            self.attempts[-1] = replace(self.attempts[-1], usage_known=True, outcome="offline_response")
+            return answer
+        except Exception as exc:
+            self._halted = True
+            safe_codes = {"model_replay_miss", "model_unavailable", "model_empty_response", "output_budget_exceeded", "model_sensitive_response", "model_invalid_response"}
+            code = exc.code if isinstance(exc, ModelUnavailable) and exc.code in safe_codes else "model_invalid_response"
+            error = ModelUnavailable("Offline response invalid/unavailable; details withheld, no retry or fallback.", code)
+            self.attempts[-1] = replace(self.attempts[-1], outcome=error.code, usage_known=True)
+            raise error from None
 
     def _record(self, prompt, tokens_in, tokens_out, started):
         cost = float((self._price_in * tokens_in + self._price_out * tokens_out) / 1_000_000)
