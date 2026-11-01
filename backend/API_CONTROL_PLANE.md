@@ -1,5 +1,11 @@
 # P4.1: API Control Plane
 
+P7 additive discovery: capabilities includes `model_workflows`, explicitly marked
+internal and `public_launchable=false`. Structured mock/replay jobs are accessible
+through the Python language-adapter API/CLI only. Existing HTTP operation/mode
+matrices and five legacy contracts remain; live, provider_validated and
+ai_security_fix.enabled stay false. See [AI_PIPELINES.md](AI_PIPELINES.md).
+
 P6.2/P6.3 update on `integration/p4`: optional explicit `language: "php"`
 requests and `security_fix_profile_id` now dispatch to verified offline PHP
 workers. Python requests/defaults, root Python operation matrix and all five

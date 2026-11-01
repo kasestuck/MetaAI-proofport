@@ -1,5 +1,15 @@
 # Architecture audit and staged implementation plan
 
+## P7 structured model-response orchestration
+
+Both language adapters now expose an internal immutable AIJob/LLMClient entry
+point. Shared strict JSON patch bindings, separate translation prompts, bounded
+mock/replay transport and LLM security proposals delegate to existing Python/PHP
+Docker verification, policies and rollback. No public live mode, new endpoint,
+environment switch or frontend change is enabled. See
+[AI_PIPELINES.md](AI_PIPELINES.md) for actual tests, artifacts, scope and remaining
+real Meta authorization/validation. Older milestone notes below are historical.
+
 ## P6.2/P6.3 offline PHP execution and cybersecurity
 
 `backend/php/` and the fixed trusted Docker PHP harness now implement actual

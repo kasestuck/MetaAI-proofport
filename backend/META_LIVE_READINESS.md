@@ -1,5 +1,11 @@
 # P5.1: first Meta call readiness — 2026-11-01
 
+P7 update: [AI_PIPELINES.md](AI_PIPELINES.md) describes the new strict shared JSON
+ModelPatch boundary, language adapters and mock/replay security generators.
+The fenced-code/disabled-generator paragraphs below describe the preserved P5.1
+interfaces. P7 model workflows still reject live clients and have made no Meta
+request. Existing paid-smoke authorization and client budget gates remain intact.
+
 No genuine model request was performed. No API credit was used. The provider,
 account permissions and model quality remain unverified until a separately
 authorized live smoke. Work stays on `integration/p4`; the HTTP control plane
