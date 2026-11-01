@@ -1,5 +1,16 @@
 # P4.1: API Control Plane
 
+P6.1 additive discovery update on integration/p4: GET capabilities now includes
+optional `languages` metadata; GET projects and project resolution add language
+inventory, nullable source/target versions and readiness. GET projects also adds
+per-project `available_profiles`. All original fields/endpoints, Python operation
+matrices, request DTOs, frozen RunSpec/public parameters and report shapes remain.
+PHP images are only configured candidates, never verified operation support.
+PHP-only runs fail preflight/creation with `language_not_enabled`; the legacy
+error envelope is preserved. Existing Python requests on mixed projects retain
+their Python-only scope and make no PHP verification claims. See
+[PHP_FOUNDATION.md](PHP_FOUNDATION.md) for exact semantics and future stages.
+
 Implemented on `backend/codex`, 2026-11-01. Frontend is unchanged. This is an
 additive, local, single-process control API; it does not enable live Meta AI.
 The five legacy routes, StartRun/RunState schemas and report envelope remain.

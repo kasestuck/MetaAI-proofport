@@ -1,5 +1,17 @@
 # Architecture audit and staged implementation plan
 
+## P6.1 language foundation: 2026-11-01
+
+Added internal language adapters without replacing the Python workers or RunSpec.
+PHP has bounded lexical structure/include analysis and explicit Docker-only lint
+on retained working copies. Language/project discovery metadata is additive;
+PHP run operations remain disabled, even when an image is present. Python-only
+requests retain their existing scope and settings. No PHP tests/golden/security
+or fix execution is implemented in this stage. Docker was unavailable during
+verification, so real PHP integration tests skipped without pulls or support
+claims. See [PHP_FOUNDATION.md](PHP_FOUNDATION.md) for actual checks, limitations
+and the P6.2–P6.5 plan.
+
 ## P4.1 per-run API control plane: 2026-11-01
 
 Added six additive `/api/v1` endpoints, immutable RunSpec, shared project policy,
