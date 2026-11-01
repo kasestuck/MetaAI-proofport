@@ -95,6 +95,7 @@
   };
 
   function runStatus(status) {
+    if (status === "finalizing") return { label: "Finalizing", tone: "info", desc: "The backend is still writing and checking the final report." };
     return RUN_STATUS[status] || { label: String(status || "Unknown"), tone: "muted", desc: "" };
   }
   function moduleStatus(status) {
@@ -151,15 +152,24 @@
 
   /**
    * Provenance of the current run. Priority:
-   *   1. Final report (settings.pipeline + simulation + verification) — authoritative.
-   *   2. Deployment profile from config.js — operator declared.
-   *   3. Event log hints — only to label *more* conservatively (simulation).
-   *   4. Unknown.
+   *   1. V1 per-run execution/parameters or report verification.control.
+   *   2. Legacy final report (settings.pipeline + simulation + verification).
+   *   3. Deployment profile, then conservative simulation event hints.
+   *   4. Unknown. Health.llm_mode never establishes run provenance.
    */
   function provenance(run) {
     if (!run) return null;
     const replayPrefix = run.origin === "replay" ? "Saved report · " : "";
     const report = run.report;
+    const parameters = run.control && run.control.parameters || report && report.verification && report.verification.control && report.verification.control.parameters;
+    if (parameters) {
+      const execution = run.control && run.control.execution;
+      const mode = execution && execution.effective || parameters.execution_mode;
+      const id = mode === "offline_fixtures" ? "fixtures" : mode === "offline" ? parameters.operation : mode;
+      const known = PIPELINES[id];
+      if (known && id !== "live") return Object.assign({ id, source: "control", simulated: mode === "simulation" }, known, { label: replayPrefix + known.label });
+      return { id: mode, source: "control", label: replayPrefix + "Live Meta AI · not verified", tone: "warn", desc: "Live generation is disabled by the current control plane. No verified AI result is claimed." };
+    }
     if (report) {
       const v = report.verification || {};
       const state = report.state || {};

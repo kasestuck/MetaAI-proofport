@@ -59,7 +59,8 @@
     const r = state.run;
     return JSON.stringify([
       state.health.status, state.health.data, state.starting, state.startError && state.startError.code,
-      r && [r.id, r.origin, r.state, r.events.length, r.reportStatus, r.chain && r.chain.status, r.finalized, r.lost, r.pollError && r.pollError.code, !!r.report],
+      state.control,
+      r && [r.id, r.origin, r.state, r.control, r.events.length, r.reportStatus, r.chain && r.chain.status, r.finalized, r.lost, r.pollError && r.pollError.code, !!r.report],
     ]);
   }
 
@@ -100,11 +101,12 @@
     const health = state.health.data;
     let active = null;
     if (run && run.origin === "replay") active = "replay";
-    else if (health) active = health.llm_mode;
+    else if (state.control.mode === "v1") active = "mock";
+    else if (state.control.mode === "legacy" && health && health.llm_mode !== "live") active = health.llm_mode;
     const llm = L.llmMode(health && health.llm_mode);
     const titles = {
-      live: "Live — real Meta AI calls. " + (active === "live" ? llm.desc : "Not active."),
-      mock: "Mock — no Meta AI calls. " + (active === "mock" ? llm.desc : "Not active."),
+      live: "Live Meta AI is disabled by the control plane. Health configuration does not authorize paid calls.",
+      mock: "Offline checks, offline fixtures or simulation. See the selected run's provenance for its exact mode.",
       replay: "Replay — viewing a saved run report. " + (active === "replay" ? "Loaded from a local file; nothing re-executed." : (health && health.llm_mode === "replay" ? llm.desc : "Not active.")),
     };
     for (const seg of document.querySelectorAll(".mode-seg")) {
@@ -117,7 +119,7 @@
     const pill = document.getElementById("run-pill");
     const run = state.run;
     if (!run) { pill.replaceChildren("No run selected"); return; }
-    const status = run.state ? L.runStatus(run.state.status) : { label: run.lost ? "Lost" : "Connecting", tone: run.lost ? "err" : "muted" };
+    const status = run.state ? L.runStatus(run.control ? run.control.lifecycle : run.state.status) : { label: run.lost ? "Lost" : "Connecting", tone: run.lost ? "err" : "muted" };
     const live = run.state && (run.state.status === "running" || run.state.status === "queued");
     pill.replaceChildren(
       h("span", null, run.origin === "replay" ? "Saved report" : "Run"),
@@ -164,11 +166,17 @@
     const health = state.health;
     const run = state.run;
 
+    if (state.control.error) {
+      list.push(banner("warn", "alert", "Control API unavailable.", state.control.error.message + " Refresh capabilities in Run control. No legacy fallback was selected."));
+    }
     if (health.status === "offline") {
       list.push(banner("err", "offline", "Backend offline.",
         "Cannot reach " + (PP.config.apiBase || location.origin) + "/api/health. Retrying every " + Math.round(PP.config.healthIntervalMs / 1000) + " s. Start the server with start.bat or `python -m backend.launcher`."));
     }
-    if (health.data) {
+    if (state.control.mode === "v1") {
+      list.push(banner("info", "info", "Meta AI disabled.", "Operations use offline checks, explicit fixtures or simulation. No paid model calls or AI Security Fix are enabled."));
+      if (!state.control.capabilities.docker.available) list.push(banner("warn", "box", "Docker unavailable.", "Real checks are blocked. Start Docker Desktop and refresh capabilities; simulation may remain available."));
+    } else if (health.data && state.control.mode === "legacy") {
       const mode = health.data.llm_mode;
       if (mode === "mock") {
         list.push(banner("warn", "info", "Meta AI is not connected.",

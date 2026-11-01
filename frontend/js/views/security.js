@@ -202,7 +202,8 @@
 
   // ---------- Rescan / scan coverage ----------
   function scanCard(run) {
-    const v = run.report ? run.report.verification || {} : null;
+    const v = run.report ? run.report.verification || {} : run.control && run.control.result.security_audit
+      ? { security_audit: run.control.result.security_audit } : null;
     if (!v) return card({ title: "Scans & rescans" }, S.reportPending(run, "Scanner coverage, parse errors and rescan results arrive with the final report"));
     const scanRow = (label, scan) => scan ? [label, h("span", null,
       `${fmt.int(Array.isArray(scan.results) ? scan.results.length : 0)} warnings`,

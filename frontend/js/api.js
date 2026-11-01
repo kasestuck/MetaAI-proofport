@@ -1,8 +1,6 @@
 /*
- * Thin client for the five existing backend endpoints (FRONTEND_HANDOFF.md §3).
- * Do not add routes or request fields here that the backend does not
- * implement: POST /api/runs rejects anything except source_path and
- * max_iterations with HTTP 422.
+ * Client for the six v1 control routes and five unchanged legacy routes.
+ * POST /api/runs still accepts only source_path and max_iterations.
  *
  * Every failure is normalised to ApiError:
  *   kind "network" – backend unreachable / timeout (status 0)
@@ -13,12 +11,13 @@
   "use strict";
 
   class ApiError extends Error {
-    constructor(kind, status, code, message) {
+    constructor(kind, status, code, message, field) {
       super(message);
       this.name = "ApiError";
       this.kind = kind;
       this.status = status;
       this.code = code;
+      this.field = field || null;
     }
   }
 
@@ -34,43 +33,57 @@
     try {
       response = await fetch(url(path), {
         method: opts.method || "GET",
-        headers: Object.assign({ Accept: "application/json" }, opts.body ? { "Content-Type": "application/json" } : {}),
+        headers: Object.assign({ Accept: "application/json" }, opts.body ? { "Content-Type": "application/json" } : {}, opts.headers),
         body: opts.body ? JSON.stringify(opts.body) : undefined,
         cache: "no-store",
         signal: controller.signal,
       });
     } catch (err) {
+      clearTimeout(timeout);
       const timedOut = err && err.name === "AbortError";
       throw new ApiError("network", 0, timedOut ? "timeout" : "network_error",
         timedOut ? "The backend did not respond in time." : "The backend is unreachable.");
-    } finally {
-      clearTimeout(timeout);
     }
 
-    const type = response.headers.get("content-type") || "";
-    let body = null;
-    if (type.includes("application/json")) {
-      try {
-        body = await response.json();
-      } catch (_) {
-        throw new ApiError("parse", response.status, "invalid_json", "The backend returned malformed JSON.");
+    try {
+      const type = response.headers.get("content-type") || "";
+      let body = null;
+      if (type.includes("application/json")) {
+        try {
+          body = await response.json();
+        } catch (err) {
+          if (!response.ok) throw new ApiError("http", response.status, "http_" + response.status, "HTTP " + response.status);
+          if (err && err.name === "AbortError") throw new ApiError("network", 0, "timeout", "The backend response body timed out.");
+          throw new ApiError("parse", response.status, "invalid_json", "The backend returned malformed JSON.");
+        }
       }
-    }
 
-    if (!response.ok) {
-      const envelope = body && typeof body === "object" && body.error && typeof body.error === "object" ? body.error : null;
-      throw new ApiError("http", response.status,
-        envelope && envelope.code ? String(envelope.code) : "http_" + response.status,
-        envelope && envelope.message ? String(envelope.message) : `HTTP ${response.status} ${response.statusText || ""}`.trim());
-    }
-    if (body === null) {
-      throw new ApiError("parse", response.status, "unexpected_content_type", `Expected JSON, received "${type || "unknown"}".`);
-    }
-    return body;
+      if (!response.ok) {
+        const envelope = body && typeof body === "object" && body.error && typeof body.error === "object" ? body.error : null;
+        throw new ApiError("http", response.status,
+          envelope && envelope.code ? String(envelope.code) : "http_" + response.status,
+          envelope && envelope.message ? String(envelope.message) : `HTTP ${response.status} ${response.statusText || ""}`.trim(), envelope && envelope.field);
+      }
+      if (body === null) {
+        throw new ApiError("parse", response.status, "unexpected_content_type", `Expected JSON, received "${type || "unknown"}".`);
+      }
+      return body;
+    } finally { clearTimeout(timeout); }
   }
 
   const api = {
     ApiError,
+
+    capabilities() { return request("/api/v1/capabilities"); },
+    projects() { return request("/api/v1/projects"); },
+    resolveProject(relativePath) {
+      return request("/api/v1/projects/resolve", { method: "POST", body: { root_id: "workspace", relative_path: relativePath } });
+    },
+    preflight(body) { return request("/api/v1/runs/preflight", { method: "POST", body }); },
+    createRun(body, key) {
+      return request("/api/v1/runs", { method: "POST", body, headers: { "Idempotency-Key": key } });
+    },
+    runDetails(id) { return request("/api/v1/runs/" + encodeURIComponent(id)); },
 
     /** GET /api/health -> {ok, docker, llm_mode} */
     health() {

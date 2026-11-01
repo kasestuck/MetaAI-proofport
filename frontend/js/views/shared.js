@@ -74,7 +74,7 @@
 
     statusBadge(status, live) {
       const s = L.runStatus(status);
-      return badge(s.label, s.tone, live && (status === "running" || status === "queued") ? "badge--live" : "");
+      return badge(s.label, s.tone, live && ["running", "queued", "finalizing"].includes(status) ? "badge--live" : "");
     },
 
     provenanceBadge(run) {

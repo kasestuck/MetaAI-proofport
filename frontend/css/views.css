@@ -197,3 +197,8 @@
 .how-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--sp-3); }
 .how-step { display: flex; gap: var(--sp-3); padding: var(--sp-3); border-radius: var(--radius); background: var(--surface-2); border: 1px solid var(--border); font-size: var(--fs-sm); }
 .how-title { font-weight: 600; color: var(--text); margin-bottom: 2px; }
+/* Control plane uses the existing cards, grid and palette. */
+button.op-card { text-align: left; color: inherit; font: inherit; width: 100%; cursor: pointer; }
+button.op-card:disabled { cursor: not-allowed; opacity: .65; }
+select.input { width: 100%; }
+.ready-action { flex-wrap: wrap; }

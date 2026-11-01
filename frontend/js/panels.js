@@ -18,6 +18,7 @@
     switch (entry.status) {
       case "done": return { iconName: "check", tone: "ok", label: "Done" };
       case "failed": return { iconName: "x", tone: "err", label: "Failed" };
+      case "finalizing": return { iconName: "refresh", tone: "info", label: "Finalizing" };
       case "running": case "queued": return { iconName: "play", tone: "info", label: entry.status === "running" ? "Running" : "Queued" };
       case "lost": return { iconName: "alert", tone: "warn", label: "Not on server" };
       default: return { iconName: "refresh", tone: "muted", label: "Connecting" };
@@ -85,6 +86,14 @@
     const llm = L.llmMode(data && data.llm_mode);
     const llmBadge = badge(llm.label, llm.tone);
     llmBadge.title = llm.desc;
+    if (state.control.mode !== "legacy") {
+      const caps = state.control.capabilities;
+      return block("System", h("div", { class: "panel-card" },
+        row("Backend", online ? badge("Online", "ok") : badge(state.health.status, "muted")),
+        row("Control API", badge(state.control.mode, state.control.mode === "v1" ? "info" : "warn")),
+        row("Docker", caps ? badge(caps.docker.available ? "Available" : "Unavailable", caps.docker.available ? "ok" : "err") : "Unknown"),
+        row("Meta AI", badge("Disabled", "muted"))));
+    }
     return block("System", h("div", { class: "panel-card" },
       row("Backend", online ? badge("Online", "ok") : state.health.status === "offline" ? badge("Offline", "err") : badge("Checking", "muted")),
       row("Docker", !data ? badge("Unknown", "muted") : data.docker ? badge("Available", "ok") : badge("Unavailable", "err")),
@@ -104,9 +113,12 @@
     if (provBadge) provBadge.title = p.desc || "";
     return block("Current run", h("div", { class: "panel-card" },
       h("div", { class: "row-between", style: { marginBottom: "6px" } },
-        h("span", { class: "big-number" }, st ? L.runStatus(st.status).label : run.lost ? "Lost" : "…"),
+        h("span", { class: "big-number" }, st ? L.runStatus(run.control ? run.control.lifecycle : st.status).label : run.lost ? "Lost" : "…"),
         st && (st.status === "running" || st.status === "queued") ? h("span", { class: "spinner" }) : null),
       row("Run", h("code", { title: run.id }, fmt.shortId(run.id))),
+      run.control ? row("Operation", run.control.parameters.operation) : null,
+      run.control ? row("Requested versions", [run.control.parameters.source_version, run.control.parameters.target_version].filter(Boolean).join(" → ") || "Not applicable") : null,
+      row("Final report", run.reportStatus),
       row("Phase", st ? L.phaseLabel(st.phase) : "—"),
       row("Elapsed", st ? fmt.seconds(st.metrics.seconds) : "—"),
       row("Isolation", st ? (st.isolation === "docker" ? "Docker" : "Reduced") : "—"),

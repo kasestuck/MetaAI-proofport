@@ -1,137 +1,97 @@
-# Proofport Console (frontend)
+# Proofport Console — P4.2
 
-Static dashboard for the Proofport backend. Plain HTML, CSS and vanilla
-JavaScript: no build step, no Node.js, no CDN, no web fonts, no requests to
-third-party hosts. The backend serves this folder at `/` when it exists
-(`backend/api/main.py`), so the console and API share one origin.
+Static HTML/CSS/vanilla JavaScript; no build step, dependencies, CDN or third-party requests at runtime. The existing three-column redesign and themes are preserved. The backend serves `frontend/` at `/` on the same origin.
 
-The source of truth for every API field and label used here is
-[`backend/FRONTEND_HANDOFF.md`](../backend/FRONTEND_HANDOFF.md).
+## Backend prerequisite
 
-## Run
+The v1 contract was read directly with:
 
-```bat
-start.bat
+```text
+git show backend/codex:backend/API_CONTROL_PLANE.md
 ```
 
-or, with an existing `.venv`:
+Contract revision: backend `e2817d0`. Frontend base: `968c5b8`.
+This frontend commit does not merge backend branches. Until P4.1 is integrated into the server checkout, that older backend returns capabilities 404 and the console deliberately uses the legacy form.
 
-```bash
-python -m backend.launcher
-```
+With a P4.1 backend serving these files, open http://127.0.0.1:8000 and choose **Migration → Run control**. Refresh the browser after updating scripts. Operations and versions no longer require editing `.env`.
 
-Open http://127.0.0.1:8000. The pipeline and LLM mode are **server settings**
-(`.env` or environment, read at startup). Offline examples:
+## Connected API routes
 
-| Goal | Environment |
+| Route | Usage |
 | --- | --- |
-| UI demo, no Docker work | `LLM_MODE=mock`, `PROOFPORT_PIPELINE=simulation` |
-| Offline fixture migration (Docker) | `LLM_MODE=mock`, `PROOFPORT_PIPELINE=fixtures`, `PROOFPORT_CASES_FILE=tests/fixtures/legacy_shop/cases.json`, `PROOFPORT_FIXTURE_FILE=tests/fixtures/legacy_shop/patches.json` |
-| Compatibility check (Docker) | `PROOFPORT_PIPELINE=compatibility`, `PROOFPORT_TARGET_VERSION=3.13`, see `backend/UNIVERSAL.md` |
+| GET `/api/v1/capabilities` | Discover policy, instance ID, Docker, verified runtimes and operation matrix; explicit refresh and before every submission/retry |
+| GET `/api/v1/projects` | Registered projects and project-bound fixture/golden profiles |
+| POST `/api/v1/projects/resolve` | Register a workspace-relative path, then use the returned project ID |
+| POST `/api/v1/runs/preflight` | Check the current request; HTTP 200 with `can_start: false` blocks Start |
+| POST `/api/v1/runs` | Create a run; HTTP 202 `{run_id}` with an Idempotency-Key |
+| GET `/api/v1/runs/{id}` | Immutable parameters, effective execution mode, lifecycle, finalized, partial results and legacy state |
+| GET `/api/health` | Connection health every 5 seconds; its startup Docker/config echoes do not override v1 readiness |
+| POST `/api/runs` | Legacy form only, sends only `source_path` and `max_iterations`; never automatically retried |
+| GET `/api/runs/{id}` | Legacy state polling |
+| GET `/api/runs/{id}/events?since=N` | Both modes: sequential cursor polling, de-duplicated by seq |
+| GET `/api/runs/{id}/report?format=json` | Both modes: final report retrieval; HTML/JSON download links use the same route |
 
-Do not enable `verify` + `live` with a real key just to look at the UI: that
-path can send paid requests. After editing frontend files, hard-refresh the
-browser (Ctrl+F5); StaticFiles allows the browser to cache scripts.
+Only **capabilities HTTP 404** selects legacy mode. Timeout, HTTP 503, malformed JSON/shape, projects 404 or run 404 never silently downgrade. Metadata errors offer explicit refresh.
 
-## Layout
+## Run control
 
-Top bar (brand, current-run pill, Live/Mock/Replay switch, New run,
-connection dot, theme toggle) → pill tabs → three columns:
+1. Select an enabled operation and a registered available project. Custom paths must be workspace-relative and pass server policy; there is no upload or clone.
+2. Choose source/target Python from the intersection of the operation matrix and configured, available, verified runtimes with the correct source/target role. Image presence alone is insufficient.
+3. Select available profiles bound to that project. Missing migration profiles block migration. Custom projects do not automatically gain fixture or golden profiles.
+4. Click **Check readiness**. Specific errors include their code, message and field. Any form edit/refresh invalidates preflight; late responses cannot approve the edited configuration.
+5. Click **Start run** after successful preflight. Creation rechecks conditions and may still reject a busy worker or changed project/runtime.
 
-- **Left – Runs**: runs opened in this browser (live run ids persisted in
-  `localStorage`, replayed reports kept in memory). Click to re-open; a run
-  the server no longer has shows as "not on server". Not a server history.
-- **Center**: the active section.
-- **Right – Context**: system status, current run, module and finding bars,
-  integrity. Visible on every tab.
+Current server operation matrix (documentation only; selectors use capabilities):
 
-Below 1280 px the columns stack (section, context, runs). The theme choice is
-stored under `proofport.console.theme`.
+| Operation | Versions | Execution |
+| --- | --- | --- |
+| Migration | 2.7 → 3.12 | offline_fixtures, requires fixture + cases profiles; iteration limit 1–5 |
+| Security Audit | source 2.7, 3.12 or 3.13 | offline; no target, translation settings, cases or fixes |
+| Compatibility Check | 3.12 → 3.12; 3.12 → 3.13; 3.13 → 3.12 | offline; explicit syntax/tests/behavior level |
+| Simulation | No runtime/version claims | Separate migration demo if the server offers it; no Docker required |
 
-## Structure
+Compatibility behavior requires a bound cases profile. Tests/behavior also require an existing nonempty passing unittest suite; preflight/worker determine this, not an invented catalog field. The UI never silently downgrades behavior to syntax. Audit parse coverage may be partial, especially with Python 2/new grammar.
 
-```
-index.html            Shell: top bar, pill tabs, three columns (runs | section | context)
-css/tokens.css        Dark + light palettes (data-theme on <html>), type, spacing, motion
-css/base.css          Reset, shell layout, responsive breakpoints (1280 / 760 px)
-css/components.css    Cards, badges, buttons, tables, progress, banners, toasts
-css/views.css         Stepper, module table, timeline, findings, evidence
-js/config.js          Deployment profile (poll interval, optional declared pipeline, path presets)
-js/util.js            h() DOM builder (text only), icons, formatters, small UI builders
-js/api.js             The five endpoints + ApiError normalisation
-js/labels.js          Honest labelling rules: statuses, provenance, error hints
-js/integrity.js       Browser re-verification of the evidence hash chain (WebCrypto)
-js/store.js           State, health loop, sequential polling, finalisation, replay
-js/panels.js          Left run list and right context panel (system, run, bars, integrity)
-js/app.js             Hash router, banners, mode switch, theme toggle, render scheduling
-js/views/*.js         overview, migration, security, compatibility, evidence (+ shared)
+Example submitted migration request:
+
+```json
+{"operation":"migration","project_id":"legacy_shop","execution_mode":"offline_fixtures","source_version":"2.7","target_version":"3.12","max_iterations":5,"fixture_profile_id":"legacy_shop_py27_py312","cases_profile_id":"legacy_shop_golden"}
 ```
 
-Scripts are classic (not ES modules), loaded in order, and attach to one
-global `window.PP`. This avoids MIME-type problems with `.js` on Windows and
-needs no bundler. A view is `{ title, sub, mount(root), update(state) }`.
+Only operation-specific whitelisted fields are sent. Browser callers never provide Docker commands, mounts, image names, API keys or manifest/cases file paths.
 
-## API usage
+## Submission safety and completion
 
-| Endpoint | Used for |
-| --- | --- |
-| `GET /api/health` | Every 5 s: backend online/offline, Docker (at server start), `llm_mode` |
-| `POST /api/runs` | Start form: only `source_path` and `max_iterations`. Never retried automatically |
-| `GET /api/runs/{id}` | Polled every 1 s, sequentially, with backoff up to 10 s on errors |
-| `GET /api/runs/{id}/events?since=N` | Same loop; cursor per run, de-duplicated by `seq` |
-| `GET /api/runs/{id}/report?format=json` | After `done`/`failed`, retried up to 4 times until state, events and report agree |
-| `GET /api/runs/{id}/report?format=html\|json` | Download links in Evidence |
+Each new intent gets a fresh UUID Idempotency-Key. Network/parse/server failures preserve the original payload, key and instance ID, including in browser storage when available. **Retry identical submission** explicitly resends those exact bytes/values, even after editing the form; it does not substitute normalized preflight parameters. No POST is automatically repeated. Known HTTP 4xx rejections clear that intent and require fresh preflight. Forgetting an uncertain intent asks for acknowledgment because a job may already exist.
 
-No other routes or request fields exist; do not add them on the frontend
-without a backend change (see handoff §11).
+Before a retry/submission the console checks instance ID. An old intent from a different backend instance is marked stale and cannot be resubmitted. A restart between the final capability read and POST cannot be made atomic by this API; run-detail instance checking detects the mismatch rather than silently attaching to another instance. No durable/multi-process guarantees are claimed.
 
-## Modes and honesty rules
+Polling uses v1 details plus legacy events, once per second with backoff on failures. `finalizing` remains active. Three independent states are displayed:
 
-- **Live / Mock / Replay** switch in the top bar. Live and Mock reflect
-  `llm_mode` from health. Replay is active while viewing a saved report JSON
-  loaded from disk ("Open saved report"); nothing is re-executed. Backend
-  `LLM_MODE=replay` is shown as "not implemented".
-- Run provenance comes from the final report (`simulation`,
-  `settings.pipeline`, `verification`). Before it arrives the label is "Mode
-  not determined", unless `config.deployment.pipeline` declares it or the
-  first event is marked `SIMULATED`.
-- "Live Meta AI · verified scope" is shown only when the report says
-  `ai_migration === true` with model calls > 0, status `done`, chain intact
-  and originals unchanged.
-- Simulated metrics carry a SIMULATED tag. Zero findings in
-  compatibility/analyze/static runs read "not scanned". Tri-state checks show
-  `null` as "Not confirmed", never as pass or fail.
-- Untrusted backend text (paths, scanner output, diffs, events) is rendered
-  only via `textContent`.
+- Backend lifecycle/finalized: whether the worker finished and released its slot.
+- Final report: idle/loading/ready/error; matching terminal state and complete event contents are required before acceptance. Report retrieval can be retried without creating a run.
+- Browser evidence chain: checking/ok/broken/empty/unavailable. Receiving a report does not imply a valid chain; this local hash consistency check is not an external signature.
 
-## Migration page
+Run IDs and this browser's history are retained locally. Backend runs remain in memory and disappear on restart; missing IDs are marked lost, never recreated. Detaching a run does not cancel the backend job.
 
-- **Choose a project**: cards for the three repository demo projects
-  (`PROJECTS` in `js/views/migration.js`); any other server-local path goes
-  in *Advanced settings* together with `max_iterations`, the request shape and
-  the server variables.
-- **Run on this server**: readiness from health (backend, Docker, AI mode) and
-  the operation, which is known only from a finished report or
-  `config.deployment.pipeline`.
-- **Operations** (Migration / Security Audit / Compatibility Check) are
-  informational: the active one is highlighted, the others say they are not
-  active. Switching would need a backend start DTO that does not exist.
-- **Pipeline** Analyze → Record → Migrate → Verify → Security → Report. A step
-  is marked only from the reported `phase` or recorded evidence events
-  (`Verify` has no backend phase: test events only). Each step shows its event
-  count; the six latest events are listed below it.
-- Configuration error codes (`pipeline_unavailable`, `docker_unavailable`,
-  `model_unavailable`, …) render as "server configuration" cards with operator
-  steps instead of a generic failure.
+## Provenance and security
 
-## Known limitations (API, not UI)
+Per-run v1 execution/parameters override deployment guesses and `health.llm_mode`. Imported newer reports use `verification.control.parameters`; older saved reports retain the legacy provenance path. Saved report replay is local read-only viewing, not backend execution.
 
-- Pipeline, target Python and fixtures cannot be chosen per run; the target
-  field is informational.
-- No run list, cancel, retry or upload; runs live in backend memory and become
-  `404` after a restart (the console says so and clears the stored id).
-- CWE, confidence, test outcomes, comparisons and fix attempts exist only in
-  the final report, so these sections fill in after the run ends.
-- No approve/reject endpoints for security decisions; the UI shows none.
-- Phases shorter than the poll interval may appear as "not observed"; they are
-  also inferred from evidence events.
+Simulation metrics/tests are labeled simulated. Offline fixtures are pre-written patches, not AI migration. Offline audit/compatibility checks do not translate code. Live Meta AI and AI Security Fix remain disabled; no generation endpoint or button is invented. A server-origin history entry named `live` internally means an API connection, not a model call.
+
+Bandit findings remain potential warnings. Zero findings are not proof of safety; no scan and a clean scan are distinct. Syntax, existing tests and recorded behavior remain separate tri-state checks; null means not confirmed. Pipeline activity events do not by themselves prove that a stage passed. Detailed CWE/diffs/fix decisions still require the final report.
+
+## Files and verification
+
+`js/api.js` retains legacy methods and adds v1 methods. `js/control.js` manages discovery, draft, profiles, preflight and immutable submission intent. `js/control-form.js` mounts the controls once so ordinary polling preserves input/focus. `store.js` handles v1 polling and report consistency. Labels, shell, panels and views consume per-run metadata. No runtime libraries were added.
+
+Tests require Node.js (tested with v24.22.1); the dashboard itself does not require Node:
+
+```text
+node --test frontend/tests/*.test.cjs
+```
+
+The tests use mock fetch, explicit contract fixtures, real WebCrypto hash checks, deterministic polling and a small DOM adapter for component wiring. They do not execute projects, Docker or Meta, and are not browser layout/end-to-end verification. Contract fixtures are not migration/security evidence. No screenshots are generated.
+
+Before release, separately authorized branch integration and a browser smoke test against the P4.1 server are still required. No merge, rebase or push is part of this change. No backend, root tests or sample sources are changed.

@@ -1,11 +1,7 @@
 /*
- * Migration: choose a demo project, see what the server will run, start a
- * run (POST /api/runs), then follow real phases, events, modules and errors.
- *
- * What a run does is decided by the server (PROOFPORT_PIPELINE, LLM_MODE),
- * not by this page: the API accepts only source_path and max_iterations.
- * The operation cards are therefore informational; switching operations
- * would need a backend API (handoff §11, "versioned start DTO").
+ * Run control mounts the v1 operation form. Only capabilities 404 reveals
+ * the older, server-configured form and informational operation cards below.
+ * Both modes share phases, events, module summaries and saved-report replay.
  *
  * The start area is mounted once (typing is never interrupted); everything
  * below it re-renders on each store update.
@@ -20,6 +16,7 @@
   let root, dynamic, sourceInput, iterInput, startBtn, formStatus, projectsHost, opsHost, readinessHost;
   const prevModuleStatus = new Map(); // module name -> last status, for the "turned green" highlight
   let prevRunId = null;
+  let legacyHost, controlForm;
 
   // ---------- Static descriptions ----------
 
@@ -120,6 +117,7 @@
 
   /** Server pipeline as far as it is known: final report > operator declaration > unknown. */
   function knownPipeline(run) {
+    if (run && run.control) return run.control.execution.effective === "offline" ? run.control.parameters.operation : run.control.execution.effective;
     if (run && run.report) return run.report.simulation ? "simulation" : (run.report.settings && run.report.settings.pipeline) || null;
     return (PP.config.deployment && PP.config.deployment.pipeline) || null;
   }
@@ -344,7 +342,7 @@
       let text = "Waiting";
       if (s.id === current) { state = "active"; text = "In progress"; }
       else if (failedAt === s.id) { state = "failed"; text = "Failed here"; }
-      else if (reached) { state = "done"; text = s.id === "report" && st && st.status === "failed" ? "Failure recorded" : "Done"; }
+      else if (reached) { state = "observed"; text = s.id === "report" && st && st.status === "failed" ? "Failure recorded" : "Activity recorded"; }
       else if (terminal) { state = "skipped"; text = "Not observed"; }
       return Object.assign({}, s, { state, text, count: counts[s.id] });
     });
@@ -518,7 +516,10 @@
   }
 
   function render(state) {
-    updateStart(state);
+    const legacy = state.control.mode === "legacy";
+    legacyHost.hidden = !legacy;
+    controlForm.update(state);
+    if (legacy) updateStart(state);
     const run = state.run;
     if (!run) {
       dynamic.replaceChildren(emptyState());
@@ -533,12 +534,15 @@
 
   PP.views.migration = {
     title: "Migration",
-    sub: "Pick a project, start the server-configured run and follow real progress",
+    sub: "Choose an operation, check readiness and follow recorded results",
     mount(el) {
       root = el;
       dynamic = h("div", { class: "stack-lg" });
       // Order: start → live run (or empty state) → operations → replay.
-      root.replaceChildren(h("div", { class: "stack-lg" }, buildStart(), dynamic, buildOperations(), replayCard()));
+      const controlHost = h("div");
+      controlForm = PP.controlForm.mount(controlHost);
+      legacyHost = h("div", { class: "stack-lg" }, buildStart(), buildOperations());
+      root.replaceChildren(h("div", { class: "stack-lg" }, controlHost, legacyHost, dynamic, replayCard()));
     },
     update: render,
   };

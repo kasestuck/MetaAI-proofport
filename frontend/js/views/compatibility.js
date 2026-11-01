@@ -1,10 +1,10 @@
 /*
  * Compatibility: Python versions and compatibility checks.
  *
- * There is no compatibility endpoint. Data comes only from the final report:
+ * V1 run details expose partial compatibility results. The final report adds:
  *   - P3 compatibility/analyze/audit: verification.compatibility, version_detection, registry
  *   - migration (fixtures/live): verification.source_python, target_tests, target_compiles
- * Before a report exists this view is informational. Tri-state rule:
+ * An older server supplies results only through its final report. Tri-state rule:
  * true = confirmed, false = failed, null/missing = not confirmed (handoff §5).
  */
 (function (PP) {
@@ -87,11 +87,11 @@
         S.limitations(d.limitations)));
   }
 
-  function registryCard(v) {
+  function registryCard(v, current) {
     const reg = Array.isArray(v.registry) ? v.registry : null;
     if (!reg) return null;
-    const yes = (x) => x ? badge("yes", "ok") : badge("no", "muted");
-    return card({ title: "Python runtime registry", flush: true, sub: "Snapshot recorded in this report — configured ≠ available ≠ verified" },
+    const yes = (x) => x === true ? badge("yes", "ok") : x === false ? badge("no", "muted") : badge("unknown", "muted");
+    return card({ title: "Python runtime registry", flush: true, sub: (current ? "Latest capabilities snapshot" : "Snapshot recorded in this report") + " — configured ≠ available ≠ verified" },
       h("div", { class: "table-wrap" }, h("table", { class: "table" },
         h("thead", null, h("tr", null, ["Version", "Image", "Configured", "Available", "Verified", "Roles"].map((t) => h("th", null, t)))),
         h("tbody", null, reg.map((r) => h("tr", null,
@@ -119,6 +119,12 @@
   }
 
   function referenceCard() {
+    if (PP.store.state.control.mode === "v1") return card({ title: "Current runtime capabilities", sub: "Available images and verified support are separate checks" },
+      h("div", { class: "stack" }, registryCard({ registry: PP.store.state.control.capabilities.runtimes }, true),
+        h("a", { class: "btn", href: "#/migration" }, "Configure a compatibility check")));
+    if (PP.store.state.control.mode !== "legacy") return card({ title: "Runtime capabilities unavailable" },
+      h("p", { class: "muted" }, "Wait for discovery or refresh capabilities in Run control. No runtime support is inferred from an unavailable response."),
+      h("a", { class: "btn", href: "#/migration" }, "Open run control"));
     return card({ title: "Runtime reference", sub: "From backend/FRONTEND_HANDOFF.md (audit 2026-10-29) — documentation, not live runtime discovery" },
       h("div", { class: "stack" },
         PP.util.kv([
@@ -132,11 +138,15 @@
 
   function render(state) {
     const run = state.run;
-    const v = run && run.report ? run.report.verification || {} : null;
+    const control = run && run.control;
+    const partial = control && control.result.compatibility ? Object.assign({}, control.parameters, {
+      mode: control.parameters.operation, compatibility: control.result.compatibility, limitations: control.result.limitations,
+    }) : null;
+    const v = run && run.report ? run.report.verification || {} : partial;
     const blocks = [];
     if (!run) {
       blocks.push(card({}, PP.util.empty("compatibility", "No compatibility data",
-        "Compatibility results come from a finished run's report (server pipeline compatibility, analyze or audit, or a migration's runtime checks). There is no separate compatibility endpoint.",
+        "Configure a compatibility operation in Run control. Syntax, existing tests and recorded behavior are separate checks; detailed analysis arrives with the final report.",
         h("div", { class: "row", style: { justifyContent: "center", marginTop: "8px" } }, S.replayButton()))));
     } else if (!v) {
       blocks.push(card({ title: "Waiting for the report" }, S.reportPending(run, "Compatibility checks, version detection and the runtime registry are published in the final report")));

@@ -54,7 +54,7 @@
   // ---------- Persistence of the last known run id (browser memory only) ----------
   function remember(run) {
     try {
-      localStorage.setItem(cfg.storageKey, JSON.stringify({ id: run.id, source: run.source, maxIterations: run.maxIterations, startedAt: run.startedAt }));
+      localStorage.setItem(cfg.storageKey, JSON.stringify({ id: run.id, source: run.source, maxIterations: run.maxIterations, startedAt: run.startedAt, apiMode: run.apiMode, instanceId: run.instanceId }));
     } catch (_) { /* storage may be unavailable; non-critical */ }
   }
   function recall() {
@@ -95,9 +95,10 @@
     const entry = {
       key, id: run.id, origin: run.origin, source: run.source, fileName: run.fileName,
       startedAt: run.startedAt, maxIterations: run.maxIterations,
-      status: run.lost ? "lost" : st ? st.status : "connecting",
+      apiMode: run.apiMode, instanceId: run.instanceId,
+      status: run.lost ? "lost" : run.control ? run.control.lifecycle : st ? st.status : "connecting",
       events: run.events.length,
-      pipeline: run.report ? (run.report.simulation ? "simulation" : run.report.settings && run.report.settings.pipeline) : null,
+      pipeline: run.control ? run.control.parameters.operation + " · " + run.control.execution.effective : run.report ? (run.report.simulation ? "simulation" : run.report.settings && run.report.settings.pipeline) : null,
       report: run.origin === "replay" ? run.report : undefined,
     };
     const index = state.history.findIndex((e) => e.key === key);
@@ -115,7 +116,7 @@
     const run = state.run;
     if (run && (run.origin === "replay" ? "replay:" + run.fileName : run.id) === key) return;
     if (entry.origin === "replay" && entry.report) openReplayData(entry.report, entry.fileName);
-    else if (entry.origin === "live") attach(entry.id, { source: entry.source, maxIterations: entry.maxIterations, startedAt: entry.startedAt, restored: true });
+    else if (entry.origin === "live") attach(entry.id, Object.assign({}, entry, { restored: true }));
   }
 
   function removeHistory(key) {
@@ -156,6 +157,10 @@
     return {
       id,
       origin: origin || "live",
+      apiMode: meta && meta.apiMode || (state.control && state.control.mode === "v1" ? "v1" : "legacy"),
+      instanceId: meta && meta.instanceId || null,
+      control: null,
+      backendFinalized: false,
       source: meta && meta.source || null,
       maxIterations: meta && meta.maxIterations || null,
       startedAt: meta && meta.startedAt || Date.now(),
@@ -203,9 +208,14 @@
   let chainVersion = 0;
   function verifyChainLater(run) {
     const version = ++chainVersion;
+    run.chain = { status: "checking", count: run.events.length };
     PP.integrity.verifyChain(run.events).then((result) => {
       if (version !== chainVersion || state.run !== run) return;
       run.chain = result;
+      emit();
+    }).catch((err) => {
+      if (version !== chainVersion || state.run !== run) return;
+      run.chain = { status: "unavailable", count: run.events.length, reason: String(err.message || err) };
       emit();
     });
   }
@@ -219,12 +229,39 @@
     pollLoop(run, token);
   }
 
+  async function snapshotFor(run, token) {
+    if (run.apiMode !== "v1") return api.getRun(run.id);
+    const details = await api.runDetails(run.id);
+    if (token !== pollToken) return details && details.state;
+    if (!details || details.run_id !== run.id || !details.state || !details.parameters || !details.execution
+      || !details.result || typeof details.instance_id !== "string" || typeof details.finalized !== "boolean"
+      || !["queued", "running", "finalizing", "done", "failed"].includes(details.lifecycle)
+      || (TERMINAL.has(details.lifecycle) && details.state.status !== details.lifecycle)) {
+      throw new api.ApiError("parse", 200, "unexpected_response", "Invalid v1 run details; legacy fallback is disabled.");
+    }
+    if (run.instanceId && details.instance_id !== run.instanceId) {
+      PP.control.observeInstance(details.instance_id);
+      run.lost = true;
+      throw new api.ApiError("control", 0, "instance_changed", "Backend instance changed. This run cannot be resumed on the new instance.");
+    }
+    run.instanceId = details.instance_id;
+    run.control = details;
+    run.backendFinalized = details.finalized;
+    remember(run);
+    return details.state;
+  }
+
+  function isFinished(run, snapshot) {
+    return TERMINAL.has(snapshot.status) && (run.apiMode !== "v1"
+      || (run.control && run.control.finalized === true && TERMINAL.has(run.control.lifecycle)));
+  }
+
   async function pollLoop(run, token) {
     run.polling = true;
     let delay = cfg.pollIntervalMs;
-    while (token === pollToken) {
+    while (token === pollToken && !run.lost) {
       try {
-        const snapshot = await api.getRun(run.id);
+        const snapshot = await snapshotFor(run, token);
         if (token !== pollToken) return;
         const batch = await api.getEvents(run.id, run.cursor);
         if (token !== pollToken) return;
@@ -234,13 +271,14 @@
         delay = cfg.pollIntervalMs;
         if (state.health.status !== "online") checkHealth();
         emit();
-        if (TERMINAL.has(snapshot.status)) {
+        if (isFinished(run, snapshot)) {
+          run.backendFinalized = true;
           await finalize(run, token);
           return;
         }
       } catch (err) {
         if (token !== pollToken) return;
-        if (err.kind === "http" && err.status === 404) {
+        if ((err.kind === "http" && err.status === 404) || err.code === "instance_changed") {
           run.lost = true;
           run.polling = false;
           run.pollError = err;
@@ -265,25 +303,25 @@
       try {
         const report = await api.getReport(run.id);
         if (token !== pollToken) return;
-        const snapshot = await api.getRun(run.id);
+        const snapshot = await snapshotFor(run, token);
         const batch = await api.getEvents(run.id, run.cursor);
         if (token !== pollToken) return;
         applyState(run, snapshot);
         const newEvents = applyEvents(run, batch);
+        const reportEvents = Array.isArray(report.events) ? report.events : [];
+        const consistent = !newEvents
+          && isFinished(run, snapshot)
+          && report.state && report.state.status === snapshot.status
+          && PP.integrity.canonical(reportEvents) === PP.integrity.canonical(run.events);
+        if (!consistent) throw new api.ApiError("parse", 200, "report_inconsistent", "The report and final state/events are not consistent. Retry report retrieval.");
         run.report = report;
         run.reportStatus = "ready";
         run.reportError = null;
-        const reportEvents = Array.isArray(report.events) ? report.events : [];
-        const consistent = !newEvents
-          && report.state && report.state.status === snapshot.status
-          && reportEvents.length === run.events.length;
-        if (consistent || i === attempts - 1) {
-          applyEvents(run, reportEvents); // fills any gap; de-duplicated by seq
-          break;
-        }
+        verifyChainLater(run);
+        break;
       } catch (err) {
         if (token !== pollToken) return;
-        if (err.kind === "http" && err.status === 404) { run.lost = true; forget(); break; }
+        if ((err.kind === "http" && err.status === 404) || err.code === "instance_changed") { run.lost = true; forget(); run.reportStatus = "error"; run.reportError = err; break; }
         run.reportError = err;
         if (i === attempts - 1) run.reportStatus = "error";
       }
@@ -395,8 +433,8 @@
   function init() {
     state.history = loadHistory().map((e) => Object.assign({}, e, { key: e.id, origin: "live" }));
     emit();
-    healthLoop();
+    PP.control.init().then(() => healthLoop());
   }
 
-  PP.store = { state, subscribe, emit, init, startRun, clearRun, retryReport, loadReplay, leaveReplay, recall, openHistory, removeHistory, TERMINAL };
+  PP.store = { state, subscribe, emit, init, startRun, attach, clearRun, retryReport, loadReplay, leaveReplay, recall, openHistory, removeHistory, TERMINAL };
 })(window.PP);
