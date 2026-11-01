@@ -1,7 +1,8 @@
 """LLMClient boundary shared by adapters. No public or implicit live activation."""
 
 import base64
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
+from decimal import Decimal
 from hashlib import sha256
 import json
 from pathlib import PurePosixPath
@@ -11,6 +12,21 @@ from backend.ai.models import ModelPatch
 from backend.ai.prompts import PYTHON, PHP, SECURITY, BOUNDARY
 from backend.llm.client import LLMClient, ModelUnavailable, _unique_json_keys, _invalid_json_constant
 from backend.llm.budget import LLMLimits
+
+
+@dataclass(frozen=True)
+class ModuleLiveApproval:
+    """Operator-approved P8 scope; never created by API settings or environment."""
+    file: str
+    source_sha256: str
+
+    def validate(self, client, language):
+        limits = client.limits
+        if (language != "python" or self.file != "legacy_shop/mathutils.py"
+                or not re.fullmatch(r"[0-9a-f]{64}", self.source_sha256)
+                or not isinstance(limits, LLMLimits) or limits.max_calls > 3
+                or limits.max_cost_usd > Decimal("0.05")):
+            raise ModelUnavailable("Live approval exceeds the first-module scope/budget.", "live_not_authorized")
 
 
 class PrivateContext:
@@ -60,12 +76,14 @@ class PrivateContext:
 
 
 class ModelSession:
-    def __init__(self, client, language, *, evidence=None):
+    def __init__(self, client, language, *, evidence=None, live_approval=None, response_dir=None):
         if not isinstance(client, LLMClient) or language not in {"python", "php"}:
             raise ModelUnavailable("Supply an explicit LLMClient and supported language.")
-        # This one gate must be reviewed after separately authorized real smoke
-        # and per-call approval. No env var/API request can activate it today.
-        if client.mode not in {"mock", "replay"}:
+        # P8 adds an explicit single-module operator approval after the real
+        # smoke. No environment variable or public API request creates it.
+        if client.mode == "live" and isinstance(live_approval, ModuleLiveApproval):
+            live_approval.validate(client, language)
+        elif client.mode not in {"mock", "replay"} or live_approval is not None:
             raise ModelUnavailable("AI pipeline live execution remains disabled pending real smoke and separate authorization.", "live_disabled")
         if not isinstance(client.limits, LLMLimits):
             raise ModelUnavailable("AI orchestration requires a bounded per-run LLM client.", "budget_required")
@@ -74,10 +92,12 @@ class ModelSession:
         self.stopped = False
         self.private = PrivateContext(client._api_key)
         self.responses = []
+        self.live_approval = live_approval
+        self.response_dir = response_dir
 
     def request(self, task, file, source, *, previous=None, failures=None, finding=None):
         if self.stopped: raise ModelUnavailable("Model response session stopped; no automatic retry.", "model_session_stopped")
-        if self.client.mode != self.mode or self.client.mode not in {"mock", "replay"}:
+        if self.client.mode != self.mode or (self.mode == "live" and self.live_approval is None):
             raise ModelUnavailable("Live/session mode switch is not authorized.", "live_disabled")
         path = PurePosixPath(file)
         suffix = ".php" if self.language == "php" else ".py"
@@ -89,6 +109,10 @@ class ModelSession:
             raise ModelUnavailable("Invalid model task binding.", "model_context_invalid")
         binding = {"task":task, "language":self.language, "file":file, "source_sha256":sha256(source.encode()).hexdigest(),
                    "finding_id":finding["id"] if finding else None}
+        if self.mode == "live":
+            self.live_approval.validate(self.client, self.language)
+            if task != "translate" or file != self.live_approval.file or binding["source_sha256"] != self.live_approval.source_sha256:
+                raise ModelUnavailable("Request is outside the approved module binding.", "live_not_authorized")
         redacted = self.private.protect(source)
         context = {**binding, "source_version":"2.7" if self.language == "python" else "7.4", "target_version":"3.12" if self.language == "python" else "8.3",
                    "source":redacted, "previous": self.private.protect(previous) if previous else None,
@@ -99,6 +123,17 @@ class ModelSession:
         count = len(self.client.attempts)
         try:
             text = self.client.complete(system, json.dumps(context, sort_keys=True, ensure_ascii=True), json_mode=True)
+            if self.response_dir is not None:
+                # Preserve returned content, including schema-invalid candidates,
+                # only after credential/private-context redaction. Never execute it.
+                record = {"mode":self.mode, "prompt_hash":self.client.attempts[-1].prompt_hash,
+                          "response":self.private.clean(text), **binding}
+                target = self.response_dir / ("response_%02d.json" % len(self.client.attempts))
+                with target.open("x", encoding="utf-8") as stream:
+                    json.dump(record, stream, sort_keys=True, ensure_ascii=True, indent=2)
+                if self.evidence:
+                    self.evidence.append("model_response_saved", json.dumps({"file":target.name,
+                        "sha256":sha256(target.read_bytes()).hexdigest(), "prompt_hash":record["prompt_hash"], "mode":self.mode}, sort_keys=True))
             data = json.loads(text, object_pairs_hook=_unique_json_keys, parse_constant=_invalid_json_constant)
             if self.private.clean(data, placeholders=True) != data:
                 raise ModelUnavailable("Sensitive model response withheld.", "model_sensitive_response")
@@ -120,7 +155,7 @@ class ModelSession:
         finally:
             if self.evidence:
                 for attempt in self.client.attempts[count:]:
-                    self.evidence.append("model_response", json.dumps({**asdict(attempt), "mode":self.client.mode, "provider_called":False}, sort_keys=True))
+                    self.evidence.append("model_response", json.dumps({**asdict(attempt), "mode":self.client.mode, "provider_called":self.mode == "live"}, sort_keys=True))
 
 
 def failure_summary(checks):
