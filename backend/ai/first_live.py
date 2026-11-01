@@ -326,7 +326,7 @@ def execute(workspace, env_file, *, acknowledged=False, runner=None, client=None
     return exported
 
 
-def verify_export(workspace):
+def verify_export(workspace, *, original_check=None):
     """Check retained report/artifact bytes and the complete ordered evidence chain.
 
     Local hashes detect inconsistency, not a malicious rewrite of all receipts.
@@ -355,7 +355,7 @@ def verify_export(workspace):
     expected_html = '<!doctype html><meta charset="utf-8"><title>Proofport P8 Meta verification</title>' + '<h1>Real Meta module verification</h1><pre>' + escape(json.dumps(report, indent=2, sort_keys=True)) + '</pre>'
     if (workspace / "report.html").read_text(encoding="utf-8") != expected_html:
         raise ValueError("HTML and JSON reports differ")
-    assert_originals(report["original_hashes"])
+    (original_check or assert_originals)(report["original_hashes"])
     return True
 
 
