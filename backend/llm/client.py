@@ -176,7 +176,8 @@ class LLMClient:
                 response = raw.parse()
                 # The SDK can coerce strings/bools into integers. Check original
                 # wire usage before accounting, rather than trusting coercion.
-                usage = raw.http_response.json().get("usage")
+                wire = raw.http_response.json()
+                usage = wire.get("usage")
                 if not isinstance(usage, dict):
                     raise ModelUnavailable("Model token usage is missing; billing cannot be confirmed.", "model_usage_invalid")
                 counts = tuple(usage.get(name) for name in ("prompt_tokens", "completion_tokens", "total_tokens"))
@@ -191,6 +192,37 @@ class LLMClient:
                     raise ModelUnavailable("Expected one model choice.", "model_invalid_response")
                 choice = response.choices[0]
                 answer = choice.message.content
+                wire_choices = wire.get("choices")
+                if (not isinstance(wire_choices, list) or len(wire_choices) != 1
+                        or not isinstance(wire_choices[0], dict)):
+                    raise ModelUnavailable("Expected one original wire choice.", "model_invalid_response")
+                wire_finish = wire_choices[0].get("finish_reason")
+                wire_message = wire_choices[0].get("message")
+                if not isinstance(wire_message, dict):
+                    raise ModelUnavailable("Invalid original wire message.", "model_invalid_response")
+                wire_answer = wire_message.get("content")
+                known_reasons = {"stop", "length", "content_filter", "tool_calls", "function_call"}
+                safe_finish = wire_finish if isinstance(wire_finish, str) and wire_finish in known_reasons else "unrecognized" if wire_finish is not None else None
+                details = usage.get("completion_tokens_details")
+                reasoning = details.get("reasoning_tokens") if isinstance(details, dict) else None
+                if type(reasoning) is not int or not 0 <= reasoning <= tokens_out:
+                    reasoning = None
+                valid_json = None
+                if json_mode and isinstance(wire_answer, str):
+                    try:
+                        valid_json = isinstance(json.loads(wire_answer, parse_constant=_invalid_json_constant,
+                                                          object_pairs_hook=_unique_json_keys), dict)
+                    except (ValueError, TypeError, RecursionError):
+                        valid_json = False
+                self.attempts[-1] = replace(self.attempts[-1], finish_reason=safe_finish,
+                    finish_reason_matches_sdk=wire_finish == choice.finish_reason,
+                    completion_tokens=tokens_out, reasoning_tokens=reasoning, output_token_limit=self.limits.max_output_tokens,
+                    output_limit_reached=tokens_out >= self.limits.max_output_tokens,
+                    content_sha256=sha256(wire_answer.encode()).hexdigest() if isinstance(wire_answer, str) else None,
+                    content_bytes=len(wire_answer.encode()) if isinstance(wire_answer, str) else None,
+                    json_object_valid=valid_json)
+                if wire_finish != choice.finish_reason or wire_answer != answer:
+                    raise ModelUnavailable("SDK and original wire response differ; candidate rejected.", "model_invalid_response")
                 if choice.finish_reason != "stop":
                     raise ModelUnavailable("Model response was incomplete, refused or requested tools; candidate rejected.", "model_incomplete_response")
                 if not isinstance(answer, str) or not answer.strip() or getattr(choice.message, "refusal", None) or getattr(choice.message, "tool_calls", None):
@@ -198,8 +230,7 @@ class LLMClient:
                 if self._api_key in answer:
                     raise ModelUnavailable("Sensitive response withheld; do not export model content.", "model_sensitive_response")
                 if json_mode:
-                    parsed = json.loads(answer, parse_constant=_invalid_json_constant, object_pairs_hook=_unique_json_keys)
-                    if not isinstance(parsed, dict):
+                    if valid_json is not True:
                         raise ValueError
                 self.attempts[-1] = replace(self.attempts[-1], outcome="ok")
                 return answer

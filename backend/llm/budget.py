@@ -43,3 +43,13 @@ class CallAttempt:
     reserved_cost_usd: float
     outcome: str = "reserved"
     usage_known: bool = False
+    # Safe wire diagnostics only; no raw content, headers or provider messages.
+    finish_reason: str | None = None
+    finish_reason_matches_sdk: bool | None = None
+    completion_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    output_token_limit: int | None = None
+    output_limit_reached: bool | None = None
+    content_sha256: str | None = None
+    content_bytes: int | None = None
+    json_object_valid: bool | None = None

@@ -50,7 +50,8 @@ def test_dotenv_sdk_settings_usage_and_env_override(tmp_path, monkeypatch):
             usage=SimpleNamespace(prompt_tokens=1000, completion_tokens=500, total_tokens=1500),
         )
         return SimpleNamespace(parse=lambda: response, http_response=SimpleNamespace(json=lambda: {"usage": {
-            "prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500}}))
+            "prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500},
+            "choices":[{"finish_reason":"stop","message":{"content":'{"ok":true}'}}]}))
 
     def fake_sdk(**kwargs):
         captured["settings"] = kwargs

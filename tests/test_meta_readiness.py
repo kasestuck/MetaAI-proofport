@@ -140,6 +140,71 @@ def test_truncated_refused_or_tool_response_is_not_candidate_code(settings, fini
     assert caught.value.code == "model_incomplete_response"
 
 
+@pytest.mark.parametrize("finish,text,at_limit,code,valid_json", [
+    ("length", '{"partial":', True, "model_incomplete_response", False),
+    ("length", '{"complete":true}', True, "model_incomplete_response", True),
+    ("length", '{"complete":true}', False, "model_incomplete_response", True),
+    ("content_filter", '{"complete":true}', False, "model_incomplete_response", True),
+    ("stop", '{"partial":', False, "model_invalid_response", False),
+    ("stop", '{"complete":true}', True, None, True),
+])
+def test_wire_diagnostics_distinguish_truncation_json_and_exact_limit(settings,finish,text,at_limit,code,valid_json):
+    usage={"prompt_tokens":30,"completion_tokens":256 if at_limit else 10,"total_tokens":286 if at_limit else 40}
+    data=completion(text,usage=usage)
+    data["choices"][0]["finish_reason"]=finish
+    client,calls=client_for(settings,lambda request:httpx2.Response(200,json=data))
+    with client:
+        if code:
+            with pytest.raises(ModelUnavailable) as caught: client.complete("Return JSON","unit",json_mode=True)
+            assert caught.value.code==code
+            with pytest.raises(ModelUnavailable): client.complete("Return JSON","second",json_mode=True)
+        else:
+            assert client.complete("Return JSON","unit",json_mode=True)==text
+    diagnostic=asdict(client.attempts[0])
+    assert diagnostic["finish_reason"]==finish and diagnostic["finish_reason_matches_sdk"] is True
+    assert diagnostic["json_object_valid"] is valid_json and diagnostic["output_limit_reached"] is at_limit
+    assert diagnostic["completion_tokens"]==usage["completion_tokens"] and diagnostic["output_token_limit"]==256
+    from hashlib import sha256
+    assert diagnostic["content_sha256"]==sha256(text.encode()).hexdigest()
+    assert diagnostic["content_bytes"]==len(text.encode())
+    assert settings[1] not in json.dumps(diagnostic) and len(calls)==1
+    assert client.tokens_out==usage["completion_tokens"]
+
+
+def test_untrusted_finish_reason_cannot_leak_provider_text(settings):
+    data=completion()
+    data["choices"][0]["finish_reason"]=settings[1]
+    client,calls=client_for(settings,lambda request:httpx2.Response(200,json=data))
+    with client,pytest.raises(ModelUnavailable): client.complete("system","user",json_mode=True)
+    assert client.attempts[0].finish_reason=="unrecognized"
+    assert settings[1] not in json.dumps(asdict(client.attempts[0])) and len(calls)==1
+
+
+@pytest.mark.parametrize("reasoning,expected", [(6,6),(None,None),(True,None),(11,None),("private-provider-text",None)])
+def test_reasoning_usage_diagnostics_are_optional_bounded_integers(settings,reasoning,expected):
+    data=completion()
+    data['usage']['completion_tokens_details']={'reasoning_tokens':reasoning}
+    client,calls=client_for(settings,lambda request:httpx2.Response(200,json=data))
+    with client: client.complete('Return JSON','unit',json_mode=True)
+    assert client.attempts[0].reasoning_tokens==expected and len(calls)==1
+
+
+@pytest.mark.parametrize('mismatch',['finish','content'])
+def test_deliberate_sdk_wire_mismatch_is_rejected(settings,mismatch):
+    from types import SimpleNamespace
+    wire=completion()
+    parsed=SimpleNamespace(choices=[SimpleNamespace(
+        finish_reason='length' if mismatch=='finish' else 'stop',
+        message=SimpleNamespace(content='different' if mismatch=='content' else '{"ok":true}'))])
+    raw=SimpleNamespace(parse=lambda:parsed,http_response=SimpleNamespace(json=lambda:wire))
+    client,calls=client_for(settings,lambda request:pytest.fail('No real HTTP in the deliberate SDK double'))
+    client._client=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(
+        with_raw_response=SimpleNamespace(create=lambda **kwargs:raw))),close=lambda:None)
+    with client,pytest.raises(ModelUnavailable) as caught: client.complete('Return JSON','unit',json_mode=True)
+    assert caught.value.code=='model_invalid_response' and len(client.attempts)==1 and not calls
+    assert client.attempts[0].finish_reason_matches_sdk is (mismatch!='finish')
+
+
 @pytest.mark.parametrize("usage", [None, {"prompt_tokens": -1, "completion_tokens": 10, "total_tokens": 9},
                                    {"prompt_tokens": 30, "completion_tokens": 10, "total_tokens": 41},
                                    {"prompt_tokens": True, "completion_tokens": 10, "total_tokens": 11},
