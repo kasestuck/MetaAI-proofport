@@ -19,6 +19,7 @@ from uuid import uuid4
 from dotenv import dotenv_values
 
 from backend.ai.provider import ModelSession, ModuleLiveApproval, StructuredTranslator
+from backend.ai.feedback import repair_feedback
 from backend.core.analyzer import analyze
 from backend.core.comparator import compare_cases
 from backend.core.evidence import Evidence, entry_hash
@@ -238,7 +239,7 @@ def execute(workspace, env_file, *, acknowledged=False, runner=None, client=None
                 or client._price_in != Decimal("1.25") or client._price_out != Decimal("4.25")):
             raise ModelUnavailable("Unexpected client/limits; no live fallback.", "live_not_authorized")
         session = ModelSession(client, "python", evidence=evidence,
-            live_approval=ModuleLiveApproval(FILE, manifest["source_sha256"]), response_dir=workspace)
+            live_approval=ModuleLiveApproval(FILE, manifest["source_sha256"]), response_dir=workspace, case_feedback=True)
         translator = StructuredTranslator(session)
         previous = feedback = None
         for iteration in range(1, 4):
@@ -264,11 +265,7 @@ def execute(workspace, env_file, *, acknowledged=False, runner=None, client=None
             # Only locally verified failures permit another paid call within the
             # explicitly approved batch. Transport/JSON/budget failures stop.
             previous = code
-            feedback = {"syntax":{"passed":checks["syntax_passed"]},
-                        "existing_tests":{"passed":checks["tests_passed"]},
-                        "golden":{"passed":checks["behavior_verified"]},
-                        "mismatched_case_ids":[c["id"] for c in checks.get("comparisons", []) if not c["matches"]],
-                        "repair_requested":True}
+            feedback = repair_feedback(checks, cases)
         if report["status"] != "done":
             report["error"] = {"code":"verification_failed"}
     except (ModelUnavailable, SandboxError, ValueError, OSError):
@@ -279,6 +276,7 @@ def execute(workspace, env_file, *, acknowledged=False, runner=None, client=None
     finally:
         client.close()
     report.update(model=client.model, model_calls=len(client.attempts), usage=[asdict(c) for c in client.calls],
+                  model_attempts=[asdict(a) for a in client.attempts],
                   budget=client.budget_snapshot(), responses=session.responses if session else [],
                   provider_validated=bool(client.calls), ai_fix_loop_used=len(client.attempts)>1,
                   originals_unchanged=project_hashes() == manifest["source_hashes"])

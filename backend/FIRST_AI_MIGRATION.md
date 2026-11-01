@@ -1,5 +1,10 @@
 # P8 — first genuine Python module migration: awaiting paid approval
 
+Update: the approved P8 run failed (26/31 cases, three tests, two API attempts,
+USD 0.01367425). [P8_FAILURE_ANALYSIS.md](P8_FAILURE_ANALYSIS.md) records P8.1's
+offline diagnosis, detailed opt-in repair observations and response diagnostics.
+The preparation notes below are historical; no successful live repair is claimed.
+
 The separately authorized synthetic Meta smoke succeeded in this session:
 one request, 57 input / 65 output tokens, estimated USD 0.0003475. That verifies
 connectivity for `muse-spark-1.3`, not a migration or security fix.

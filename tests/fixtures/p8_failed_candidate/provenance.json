@@ -1,0 +1,12 @@
+{
+  "provenance": "real_meta_p8_failed_candidate_not_a_fix",
+  "model": "muse-spark-1.3",
+  "prompt_hash": "9f1c825af155b658d6f24158695720fc24e0fc337e95f5e38a8731c528dbeb66",
+  "candidate_sha256": "ac80d021812f89ab7007801485919e34d41136c14fc87ee99dd277b1a1408779",
+  "original_report_sha256": "14d0dfed6aa9d37b27e39686a6820d278db02e73c1f54c083b249099b9f2bea5",
+  "golden_matches": 26,
+  "golden_total": 31,
+  "source_python": "2.7.18",
+  "target_python": "3.12.16",
+  "fixture_utf8_lf_sha256": "55980ca4d7481fd474369f2a51b610cf8046e97b70bfb9d8e146618fd7dddb14"
+}

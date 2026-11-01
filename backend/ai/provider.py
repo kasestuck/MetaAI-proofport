@@ -9,7 +9,7 @@ from pathlib import PurePosixPath
 import re
 
 from backend.ai.models import ModelPatch
-from backend.ai.prompts import PYTHON, PHP, SECURITY, BOUNDARY
+from backend.ai.prompts import PYTHON, PYTHON_REPAIR, PHP, SECURITY, BOUNDARY
 from backend.llm.client import LLMClient, ModelUnavailable, _unique_json_keys, _invalid_json_constant
 from backend.llm.budget import LLMLimits
 
@@ -76,7 +76,7 @@ class PrivateContext:
 
 
 class ModelSession:
-    def __init__(self, client, language, *, evidence=None, live_approval=None, response_dir=None):
+    def __init__(self, client, language, *, evidence=None, live_approval=None, response_dir=None, case_feedback=False):
         if not isinstance(client, LLMClient) or language not in {"python", "php"}:
             raise ModelUnavailable("Supply an explicit LLMClient and supported language.")
         # P8 adds an explicit single-module operator approval after the real
@@ -94,6 +94,9 @@ class ModelSession:
         self.responses = []
         self.live_approval = live_approval
         self.response_dir = response_dir
+        if type(case_feedback) is not bool or (case_feedback and language != "python"):
+            raise ModelUnavailable("Detailed case feedback is restricted to explicit Python repair.", "model_context_invalid")
+        self.case_feedback = case_feedback
 
     def request(self, task, file, source, *, previous=None, failures=None, finding=None):
         if self.stopped: raise ModelUnavailable("Model response session stopped; no automatic retry.", "model_session_stopped")
@@ -119,7 +122,8 @@ class ModelSession:
                    "failures": self.private.clean(failures), "schema":ModelPatch.model_json_schema()}
         if finding:
             context["finding"] = self.private.clean({k:finding[k] for k in ("id","file","line","scope","scanner_test","cwe","severity","confidence","description") if k in finding})
-        system = (SECURITY if task == "security" else PYTHON if self.language == "python" else PHP) + "\n" + BOUNDARY
+        detailed_repair = task == "translate" and previous is not None and self.case_feedback
+        system = (SECURITY if task == "security" else PYTHON_REPAIR if detailed_repair else PYTHON if self.language == "python" else PHP) + "\n" + BOUNDARY
         count = len(self.client.attempts)
         try:
             text = self.client.complete(system, json.dumps(context, sort_keys=True, ensure_ascii=True), json_mode=True)
@@ -175,10 +179,12 @@ class StructuredTranslator:
         self.mode = "model_" + self.client.mode
 
     def translate(self, relative, source, previous=None, failures=None):
-        # Existing Python feedback has richer/raw observations. Reduce it at
-        # this boundary as well; the model never receives expected answers.
+        # Generic adapters keep status/ID feedback. Only explicit P8 case
+        # feedback may include bounded expected/actual observations.
         if failures and (not isinstance(failures, dict) or not {"syntax","golden","existing_tests"} <= set(failures)):
             failures = {"verification_failed": True, "repair_requested": True}
+        if isinstance(failures, dict) and not self.session.case_feedback and "failing_cases" in failures:
+            failures = {k:v for k,v in failures.items() if k != "failing_cases"}
         patch = self.session.request("translate", relative, source, previous=previous, failures=failures)
         if patch.behavior_impact != "preserves" or patch.review_areas:
             raise ModelUnavailable("Translation declares semantic/API/configuration changes; needs_review.", "needs_review")

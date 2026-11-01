@@ -74,7 +74,9 @@ def model_client(env, *, outcome="success", observed=None):
 def checks(success=True, syntax=True):
     return {"syntax_passed":syntax, "tests_passed":success if syntax else None,
             "behavior_verified":success if syntax else None,
-            "comparisons":[{"id":"unit.case", "matches":success}]}
+            "comparisons":[{"id":"mathutils.mean_float", "matches":success,
+                **({} if success else {"expected":{"steps":[{"value":{"t":"float","v":"1.75"}}]},
+                                      "actual":{"steps":[{"value":{"t":"float","v":"1.0"}}]}})}]}
 
 
 def test_prepare_has_no_client_and_preserves_existing_assertions(prepared):
@@ -134,7 +136,7 @@ def test_mocked_success_seals_response_checks_and_report(prepared,monkeypatch):
 
 
 @pytest.mark.parametrize("first", [checks(False,False),checks(False,True)])
-def test_verified_failure_allows_bounded_repair_without_answers(prepared,monkeypatch,first):
+def test_verified_failure_allows_bounded_repair_with_explicit_observations(prepared,monkeypatch,first):
     workspace, env, runner = prepared
     results=iter([first, checks()])
     monkeypatch.setattr(p8,"verify_candidate",lambda *a:next(results))
@@ -143,7 +145,8 @@ def test_verified_failure_allows_bounded_repair_without_answers(prepared,monkeyp
     assert report["status"] == "done" and report["ai_fix_loop_used"] and report["model_calls"] == 2
     context=json.loads(json.loads(requests[1].content)["messages"][1]["content"])
     assert context["previous"] and context["failures"]["repair_requested"]
-    assert "expected" not in context["failures"]
+    if first["syntax_passed"]:
+        assert context["failures"]["failing_cases"][0]["expected"][0]["value"]["v"] == "1.75"
 
 
 def test_three_mismatches_roll_back_and_prevent_restart(prepared,monkeypatch):
