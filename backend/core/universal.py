@@ -22,13 +22,8 @@ def _path(root, value):
 
 
 def _copy(source, destination):
-    if source.is_symlink() or (source.is_dir() and any(path.is_symlink() for path in source.rglob("*"))):
-        raise ValueError("Source links require manual review.")
-    if source.is_dir():
-        shutil.copytree(source, destination, ignore=shutil.ignore_patterns(".*", "__pycache__"))
-    else:
-        destination.mkdir()
-        shutil.copy2(source, destination / source.name)
+    from backend.core.projects import copy_project
+    copy_project(source, destination)
 
 
 def _level(checks):
@@ -94,6 +89,10 @@ def execute(run, run_id, root, settings, mode):
                 registry.verify(version, run.evidence)
         selected = registry.select(analysis_version, "source")
         selected_target = registry.select(target, "target") if target else None
+        if run.spec and run.spec.images:
+            pins = dict(run.spec.images)
+            if any(item["image_id"] != pins.get(item["image"]) for item in (selected, selected_target) if item):
+                raise VersionError("Selected runtime changed after preflight.", "runtime_changed")
         details.update(registry=registry.snapshot(), source_version=source_version, analysis_interpreter=analysis_version,
                        target_version=target, migration_performed=False)
         state.isolation = "docker"
@@ -135,7 +134,7 @@ def execute(run, run_id, root, settings, mode):
                 except InvalidSpecifier:
                     checks["target_metadata_compatible"] = None
                     details["limitations"].append("Target Python metadata constraints could not be interpreted.")
-            if (project / "tests").is_dir():
+            if settings.get("PROOFPORT_VERIFICATION_LEVEL") != "syntax" and (project / "tests").is_dir():
                 tests = invoke(run.runner, selected_target["image_id"], project, "tests", evidence=run.evidence, version=target)
                 details["project_executed"] = True
                 ids = [test["id"] for test in tests["outcomes"]]
@@ -146,6 +145,8 @@ def execute(run, run_id, root, settings, mode):
                     state.metrics.tests_passed += sum(test["status"] == "passed" for test in tests["outcomes"])
             if checks["tests_passed"] is None:
                 details["limitations"].append("No nonempty supported existing test suite was verified.")
+                if settings.get("PROOFPORT_REQUIRED_TESTS") == "1":
+                    raise VersionError("Requested existing test verification produced no nonempty suite.", "tests_unavailable")
             case_path = settings.get("PROOFPORT_CASES_FILE")
             if case_path:
                 if not source_version:
@@ -179,6 +180,8 @@ def execute(run, run_id, root, settings, mode):
             if checks["behavior_verified"] is True:
                 for module in state.modules:
                     module.status = "green"
+            if settings.get("PROOFPORT_VERIFICATION_LEVEL") == "behavior" and checks["behavior_verified"] is not True:
+                raise VersionError("Requested behavior verification lacks complete positive module coverage.", "insufficient_cases")
         terminal = "done"
     except Exception as exc:
         state.error = Error(code=getattr(exc, "code", "verification_unavailable"),
@@ -206,15 +209,4 @@ def execute(run, run_id, root, settings, mode):
         if terminal == "failed":
             for module in state.modules:
                 module.status = "failed"
-        if run.workspace:
-            from backend.core.report import report_data, render_html
-            data = report_data(run, status=terminal)
-            try:
-                (run.workspace / "report.json").write_text(json.dumps(data, indent=2, ensure_ascii=True), encoding="utf-8")
-                (run.workspace / "report.html").write_text(render_html(data), encoding="utf-8")
-            except OSError:
-                terminal = "failed"
-                state.error = Error(code="report_unavailable", message="Report persistence failed.")
-                for module in state.modules:
-                    module.status = "failed"
-        state.status = terminal
+        run.pending_status = terminal

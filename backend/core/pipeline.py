@@ -43,6 +43,7 @@ def execute(run, run_id, root, settings, mode):
     translator = None
     model_calls_recorded = 0
     state.status = "running"
+    terminal = "failed"
     try:
         if settings.get("PROOFPORT_SECURITY_FIXTURES") and mode != "fixtures":
             raise PipelineFailure("offline_only", "Security fixture verification cannot invoke live or replay model generation.")
@@ -115,7 +116,7 @@ def execute(run, run_id, root, settings, mode):
         if mode == "fixtures":
             translator = FixtureTranslator(_setting_path(root, settings, "PROOFPORT_FIXTURE_FILE"))
         else:
-            translator = LiveTranslator(root)
+            raise ModelUnavailable("Live Meta AI is disabled pending separate authorization. No model request was made.")
         run.verification["model"] = translator.client.model if translator.client else None
         modules = {module.name: module for module in state.modules}
         by_file = {module["file"]: module for module in analysis["order"]}
@@ -238,10 +239,10 @@ def execute(run, run_id, root, settings, mode):
             run.verification["limitations"].append("Security decisions use offline fixtures and real Docker checks, not Meta AI. Behavior/configuration/crypto changes require review; a clean scan is not full security.")
         if not success:
             raise PipelineFailure("verification_failed", "Candidate did not pass all compilation, golden, test suite, and scanner checks. No complete migration is claimed.")
-        state.status = "done"
+        terminal = "done"
     except Exception as exc:
         code = "run_interrupted" if runner.cancelled.is_set() else getattr(exc, "code", "model_unavailable" if isinstance(exc, ModelUnavailable) else "verification_failed")
-        state.status = "failed"
+        terminal = "failed"
         # Provider bodies, keys, and source snippets are not included in top-level errors.
         message = str(exc) if isinstance(exc, (PipelineFailure, ModelUnavailable, SandboxError)) else f"Pipeline failed: {type(exc).__name__}; inspect saved stage evidence."
         state.error = Error(code=code, message=message)
@@ -251,7 +252,7 @@ def execute(run, run_id, root, settings, mode):
             translator.close()
         state.phase = "reporting"
         if runner.cancelled.is_set():
-            state.status = "failed"
+            terminal = "failed"
             state.error = Error(code="run_interrupted", message="Docker verification was cancelled; no complete migration is claimed.")
         for module in state.modules:
             if module.status != "green":
@@ -261,19 +262,15 @@ def execute(run, run_id, root, settings, mode):
         except OSError:
             state.hashes["unchanged"] = False
         if not state.hashes["unchanged"]:
-            state.status = "failed"
+            terminal = "failed"
             state.error = Error(code="source_changed", message="Original source hashes changed or could not be rechecked.")
             run.evidence.append("error", state.error.message)
         state.metrics.seconds = round(monotonic() - run.started, 3)
         run.verification["model_calls"] = model_calls_recorded
-        run.verification["ai_migration"] = mode == "live" and state.status == "done" and model_calls_recorded > 0
-        run.evidence.append("run_finished", f"Real Docker pipeline status={state.status}; provider={mode}; original hashes unchanged={state.hashes['unchanged']}.")
+        run.verification["ai_migration"] = False
+        run.evidence.append("run_finished", f"Real Docker pipeline status={terminal}; provider={mode}; original hashes unchanged={state.hashes['unchanged']}.")
         state.chain_intact = run.evidence.verify()
         if not state.chain_intact:
-            state.status = "failed"
+            terminal = "failed"
             state.error = Error(code="evidence_corrupted", message="Evidence chain verification failed.")
-        if run.workspace:
-            from backend.core.report import render_html, report_data
-            data = report_data(run)
-            _write(run.workspace / "report.json", data)
-            (run.workspace / "report.html").write_text(render_html(data), encoding="utf-8")
+        run.pending_status = terminal
