@@ -1,5 +1,10 @@
 # P8.3 — first real PHP migration preparation, awaiting separate paid permission
 
+Result update: [P83_PHP_LIVE_RESULT.md](P83_PHP_LIVE_RESULT.md) records the later,
+separately authorized successful live trial: one genuine Meta request, 22/22
+golden cases, 9/9 existing tests and estimated USD 0.00612075. The preparation
+notes below are historical; originals and baseline receipts remain unchanged.
+
 Branch: `integration/p4`. This milestone made **zero Meta API requests** and
 spent **USD 0**. It prepares a runnable, bounded local trial; it does not claim
 successful PHP AI migration. Original php_shop, frontend and public API are
