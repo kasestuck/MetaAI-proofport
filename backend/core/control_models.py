@@ -17,6 +17,7 @@ class ControlError(Exception):
 
 class ControlRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+    language: Literal["python", "php"] = "python"
     operation: Literal["migration", "audit", "compatibility"]
     project_id: str = Field(min_length=1, max_length=128)
     source_version: str | None = Field(default=None, max_length=16)
@@ -24,6 +25,7 @@ class ControlRequest(BaseModel):
     execution_mode: Literal["offline_fixtures", "offline", "simulation", "live"] = "offline"
     fixture_profile_id: str | None = Field(default=None, max_length=128)
     cases_profile_id: str | None = Field(default=None, max_length=128)
+    security_fix_profile_id: str | None = Field(default=None, max_length=128)
     verification_level: Literal["syntax", "tests", "behavior"] | None = None
     max_iterations: int = Field(default=5, ge=1, le=5, strict=True)
 
@@ -50,8 +52,13 @@ class RunSpec:
     source_hashes: tuple[tuple[str, str], ...] = ()
     fixture_profile_id: str | None = None
     cases_profile_id: str | None = None
+    language: str = "python"
+    security_fix_profile_id: str | None = None
 
     def public(self):
-        return {key: getattr(self, key) for key in (
+        data = {key: getattr(self, key) for key in (
             "operation", "project_id", "source_version", "target_version", "execution_mode",
             "max_iterations", "verification_level", "fixture_profile_id", "cases_profile_id")}
+        if self.language != "python":
+            data.update(language=self.language, security_fix_profile_id=self.security_fix_profile_id)
+        return data

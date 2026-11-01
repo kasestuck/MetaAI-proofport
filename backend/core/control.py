@@ -19,8 +19,11 @@ from backend.core.versions import RUNTIMES
 class ControlPlane:
     CASES = {"legacy_shop_golden": ("legacy_shop", "tests/fixtures/legacy_shop/cases.json"),
              "universal_py3_golden": ("universal_py3", "tests/fixtures/universal_py3/cases.json"),
-             "security_subject_golden": ("security_subject", "tests/fixtures/security_subject/cases.json")}
-    FIXTURES = {"legacy_shop_py27_py312": ("legacy_shop", "tests/fixtures/legacy_shop/patches.json")}
+             "security_subject_golden": ("security_subject", "tests/fixtures/security_subject/cases.json"),
+             "php_shop_golden": ("php_shop", "tests/fixtures/php_profiles/cases.json")}
+    FIXTURES = {"legacy_shop_py27_py312": ("legacy_shop", "tests/fixtures/legacy_shop/patches.json"),
+                "php_shop_74_83": ("php_shop", "tests/fixtures/php_profiles/migration.json")}
+    SECURITY_FIXTURES = {"php_shop_security": ("php_shop", "tests/fixtures/php_profiles/security.json")}
 
     def __init__(self, root, store, projects):
         self.root, self.store, self.projects = root, store, projects
@@ -39,15 +42,27 @@ class ControlPlane:
     def catalog(self):
         data = {"root_id": "workspace", "projects": self.projects.snapshot(),
                 "cases_profiles": [{"id": key, "project_id": value[0], "available": (self.root / value[1]).is_file()} for key, value in self.CASES.items()],
-                "fixture_profiles": [{"id": key, "project_id": value[0], "available": (self.root / value[1]).is_file()} for key, value in self.FIXTURES.items()]}
+                "fixture_profiles": [{"id": key, "project_id": value[0], "available": (self.root / value[1]).is_file()} for key, value in self.FIXTURES.items()],
+                "security_fix_profiles": [{"id": key, "project_id": value[0], "available": (self.root / value[1]).is_file(), "mode": "fixture"} for key, value in self.SECURITY_FIXTURES.items()]}
         for project in data["projects"]:
             project["available_profiles"] = {kind: [p["id"] for p in data[kind + "_profiles"] if p["project_id"] == project["project_id"] and p["available"]]
                                              for kind in ("cases", "fixture")}
+            if project.get("language") == "php":
+                fixes = [p["id"] for p in data["security_fix_profiles"] if p["project_id"] == project["project_id"] and p["available"]]
+                if fixes: project["available_profiles"]["security_fix"] = fixes
+                ready = self.capabilities.snapshot().get("languages", {}).get("php", {})
+                project["supported_operations"] = ready.get("supported_operations", [])
+                project["readiness"] = ready.get("readiness", {"can_start": False})
         return data
 
     def prepare(self, request):
         if request.execution_mode == "live":
             raise ControlError("live_disabled", "Live Meta AI is disabled. No model request was made.", 403, "execution_mode")
+        if request.language == "php":
+            from backend.php.control import prepare
+            return prepare(self, request)
+        if request.security_fix_profile_id:
+            raise ControlError("incompatible_parameters", "This security fixture profile is only available for explicit PHP operations.")
         source = self.projects.get(request.project_id)
         operation, mode = request.operation, request.execution_mode
         settings = {}

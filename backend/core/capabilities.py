@@ -79,6 +79,6 @@ class Capabilities:
                     "scope": "Runtime self-tests and listed operation adapters, not universal project compatibility. Missing/unverified images cannot be selected."}
             from copy import deepcopy
             from backend.languages.registry import LanguageRegistry
-            data["languages"] = LanguageRegistry().snapshot(data, probe=probe, docker=docker)
+            data["languages"] = LanguageRegistry(root=self.root).snapshot(data, probe=probe, docker=docker)
             self.cached, self.checked = deepcopy(data), monotonic()
             return data

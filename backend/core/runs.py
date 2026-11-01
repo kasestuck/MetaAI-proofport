@@ -78,15 +78,16 @@ class RunStore:
             source = self.root / source
         source = source.resolve()
         pipeline = spec.pipeline if spec else self.pipeline
+        php = bool(spec and spec.language == "php")
         universal = pipeline in {"analyze", "audit", "compatibility"}
-        if not source.is_dir() and not (universal and source.is_file() and source.suffix == ".py"):
+        if not source.is_dir() and not ((universal or php) and source.is_file() and source.suffix == (".php" if php else ".py")):
             raise RunError(400, "source_not_found", "The source folder does not exist.")
         try:
             originals = hashes_for(source)
             modules = {}
             states = []
             for path in source_files(source):
-                if path.suffix != ".py":
+                if path.suffix != (".php" if php else ".py"):
                     continue
                 relative = Path(path.name) if source.is_file() else path.relative_to(source)
                 name = ".".join(relative.with_suffix("").parts)
@@ -162,6 +163,7 @@ class RunStore:
         run = self.runs[run_id]
         pipeline = run.spec.pipeline
         worker = self._universal_pipeline if pipeline in {"analyze", "audit", "compatibility"} else (self._simulate if run.simulation else (self._real_pipeline if run.use_real else self._verification_unavailable))
+        if run.spec.language == "php": worker = self._php_pipeline
         try:
             await worker(run_id)
         except asyncio.CancelledError:
@@ -255,6 +257,18 @@ class RunStore:
             await asyncio.shield(worker)
         except asyncio.CancelledError:
             await asyncio.to_thread(run.runner.cancel)
+            await worker
+            raise
+
+    async def _php_pipeline(self, run_id):
+        from backend.php.worker import execute_run
+        run = self.runs[run_id]
+        run.runner = self._runner(run) if run.spec.operation != "audit" else None
+        worker = asyncio.create_task(asyncio.to_thread(execute_run, run, run_id, self.root, dict(run.spec.settings)))
+        try:
+            await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            if run.runner: await asyncio.to_thread(run.runner.cancel)
             await worker
             raise
 

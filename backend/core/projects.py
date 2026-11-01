@@ -82,7 +82,7 @@ def copy_project(source, destination):
 class ProjectCatalog:
     """The workspace is the approved root; service/source-control areas are denied."""
     DEFAULTS = {"legacy_shop": "samples/legacy_shop", "universal_py3": "tests/fixtures/universal_py3",
-                "security_subject": "tests/fixtures/security_subject"}
+                "security_subject": "tests/fixtures/security_subject", "php_shop": "tests/fixtures/php_shop"}
     MAX_FILES = 2000
     MAX_BYTES = 16 * 1024 * 1024
 
@@ -152,10 +152,10 @@ class ProjectCatalog:
         return {"project_id": project_id, "relative_path": relative, "kind": "file" if path.is_file() else "directory",
                 **project_language(path, self.inspect(path, inventory_only=True))}
 
-    def get(self, project_id):
+    def get(self, project_id, *, inventory_only=False):
         if project_id not in self.entries:
             raise ControlError("project_not_found", "Resolve or select a registered project first.", 404, "project_id")
-        return self.resolve(self.entries[project_id])
+        return self.resolve(self.entries[project_id], inventory_only=inventory_only)
 
     def snapshot(self):
         entries = []

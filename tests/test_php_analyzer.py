@@ -141,7 +141,7 @@ class LintDouble:
         if "-r" in command:
             assert command[-1] == "echo PHP_VERSION;"
             return Result(image, 0, self.patch, "", 0.01)
-        assert "-l" in command and "--" in command and command[-1].startswith("/src/")
+        assert "-l" in command and "--" not in command and command[-1].startswith("/src/")
         return Result(image, 255 if self.failed else 0, "not persisted", "not persisted", 0.01, timed_out=self.timeout)
 
 
@@ -190,12 +190,15 @@ def test_lint_never_mounts_composer_auth(tmp_path):
     assert auth.read_text() == '{"unit":"private-value"}'
 
 
-def test_no_php_run_operations_bandit_or_patches_are_enabled(tmp_path):
+def test_php_adapter_delegates_explicit_worker_and_static_scanner(tmp_path, monkeypatch):
     adapter = PHPAdapter(); source = subject(tmp_path, "<?php echo 1;"); before = source.read_bytes()
-    with pytest.raises(AdapterError, match="P6.2"):
-        adapter.compatibility(None, None, None, None)
-    with pytest.raises(AdapterError, match="P6.3"):
-        adapter.security_findings(None, source, Evidence())
+    seen = []
+    monkeypatch.setattr("backend.php.worker.execute_run", lambda *args: seen.append(args))
+    adapter.compatibility("run", "id", "root", {})
+    assert seen == [("run", "id", "root", {})]
+    monkeypatch.setattr("backend.core.security.scan", lambda *args: pytest.fail("Never use Bandit for PHP"))
+    scanned = adapter.security_findings(None, source, Evidence())
+    assert scanned.language == "php" and not scanned.findings and scanned.coverage == "limited_lexical"
     assert source.read_bytes() == before
 
 

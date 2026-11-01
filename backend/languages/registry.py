@@ -15,7 +15,8 @@ def project_language(source, files):
 
 
 class LanguageRegistry:
-    def __init__(self, adapters=None):
+    def __init__(self, adapters=None, *, root=None):
+        self.root = root
         if adapters is None:
             from backend.languages.python import PythonAdapter
             from backend.languages.php import PHPAdapter
@@ -63,11 +64,24 @@ class LanguageRegistry:
                 entry["profiles_endpoint"] = "/api/v1/projects"
             elif language == "php":
                 states = php_runtimes(probe, docker=docker)
+                from backend.php.receipts import supported
+                readiness = supported(self.root, states) if self.root else {}
+                operations = [op for op in ("migration", "audit", "compatibility") if readiness.get(op)]
+                for state in states:
+                    state["verified"] = bool(readiness.get("migration"))
+                    if state["verified"]: state["reason"] = "owned_demo_e2e_verified"
                 entry.update(runtimes=states,
-                             source_versions=[], target_versions=[],
+                             available=bool(operations), verified=bool(readiness.get("receipt_valid")), supported_operations=operations,
+                             source_versions=["7.4", "8.3"] if readiness.get("migration") else [], target_versions=["8.3"] if readiness.get("migration") else [],
                              configured_source_versions=[r["version"] for r in states if r["source"]],
                              configured_target_versions=[r["version"] for r in states if r["target"]],
                              planned_pairs=[["7.4", "8.3"]], lexical_analysis_available=True,
-                             readiness={"can_start": False, "reason": "php_operations_not_implemented"})
+                             operations={"migration": {"pairs": [["7.4", "8.3"]], "execution_modes": ["offline_fixtures"]},
+                                         "audit": {"source_versions": ["7.4", "8.3"], "execution_modes": ["offline"], "static_only": True},
+                                         "compatibility": {"pairs": [["7.4", "8.3"]], "execution_modes": ["offline"], "verification_levels": ["syntax", "tests", "behavior"]}},
+                             verification_scope="Owned fixture E2E and finite inputs; project-specific preflight still required. Static security findings are potential risks.",
+                             readiness={"can_start": bool(operations), "requires_preflight": True, "reason": "preflight_required" if operations else "php_e2e_verification_required"})
+                if operations: entry.pop("available_profiles")
+                entry["profiles_endpoint"] = "/api/v1/projects"
             entries[language] = entry
         return entries

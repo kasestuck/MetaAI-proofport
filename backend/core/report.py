@@ -23,6 +23,11 @@ def report_data(run: Run, *, status: str | None = None) -> dict:
         notice = (f"Offline {run.execution_mode}; compatibility={level}; status={reported_status}. "
                   "No migration, source modifications, remediation or model calls. Completion is not proof of project compatibility. "
                   "Runtime self-tests certify only the shipped harness. Bandit findings are potential risks; parsing errors limit coverage.")
+    if run.verification.get("language") == "php":
+        notice = (f"PHP offline operation; mode={run.execution_mode}; status={reported_status}. "
+                  "Authored fixtures are not AI migration or AI fixes. Syntax, tests and finite recorded behavior are separate checks. "
+                  "The PHP lexical scanner reports potential risks, not confirmed exploits or complete security. "
+                  + ("Static audit only; no project code executed." if run.spec.operation == "audit" else "Project execution used pinned Docker images; originals were not modified."))
     return {
         "simulation": run.simulation,
         "notice": notice,

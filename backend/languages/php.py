@@ -215,7 +215,7 @@ class PHPAdapter:
         for path in php_files:
             relative = path.name if source.is_file() else path.relative_to(source).as_posix()
             observed = runner.run(image_id, root, ["php", "-n", "-d", "auto_prepend_file=", "-d", "auto_append_file=",
-                                  "-d", "opcache.enable_cli=0", "-l", "--", "/src/" + relative])
+                                  "-d", "opcache.enable_cli=0", "-l", "/src/" + relative])
             if observed.timed_out or observed.output_exceeded:
                 raise AdapterError("php_lint_unavailable", "Docker lint did not complete; no syntax verdict.", 503)
             if observed.exit_code not in {0, 255}:
@@ -232,7 +232,9 @@ class PHPAdapter:
         return replace(result, analysis=data, verification=Verification(syntax_passed=all(item["syntax_passed"] for item in outcomes)))
 
     def compatibility(self, run, run_id, root, settings):
-        raise AdapterError("php_compatibility_not_implemented", "PHP tests and golden comparison are planned for P6.2.")
+        from backend.php.worker import execute_run
+        return execute_run(run, run_id, root, settings)
 
     def security_findings(self, runner, source, evidence):
-        raise AdapterError("php_security_not_implemented", "PHP security audit is planned for P6.3; Bandit is never used for PHP.")
+        from backend.php.security import security_result
+        return security_result(source, evidence)
