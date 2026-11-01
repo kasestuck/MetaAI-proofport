@@ -71,9 +71,24 @@ class LLMFixGenerator:
             raise ValueError("Model proposal references another finding.")
         return proposal.model_copy(update={"mode": "live"})
 
-    def __init__(self, client=None):
+    def __init__(self, client=None, *, session=None, rules=(), scopes=(), max_proposals=2):
         # Future wiring may supply LLMClient. It is never constructed or called here.
         self.client = client
+        self.session = session
+        self.rules, self.scopes = frozenset(rules), frozenset(scopes)
+        if type(max_proposals) is not int or not 1 <= max_proposals <= 4: raise ValueError("Bound security proposals to 1..4")
+        self.maximum, self.count = max_proposals, 0
+        self.mode = session.mode if session else "disabled"
 
     def generate(self, finding, source):
-        raise OfflineOnlyError("Live/replay security generation is disabled. This milestone permits offline fixtures only.")
+        from backend.ai.provider import ModelSession
+        if not isinstance(self.session, ModelSession):
+            raise OfflineOnlyError("Security model generation requires an explicit bounded offline ModelSession; live is disabled.")
+        if self.rules and finding["scanner_test"] not in self.rules or self.scopes and finding.get("scope") not in self.scopes:
+            return None
+        if self.count >= self.maximum: return None
+        self.count += 1
+        patch = self.session.request("security", finding["file"], source, finding=finding)
+        return FixProposal(finding_id=finding["id"], explanation=patch.explanation, proposed_code=patch.proposed_code,
+                           behavior_impact=patch.behavior_impact, confidence=patch.confidence, review_areas=patch.review_areas,
+                           mode=self.mode)

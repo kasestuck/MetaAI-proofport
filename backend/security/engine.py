@@ -133,8 +133,8 @@ class SecurityFixEngine:
         return all(checks[stage]["passed"] for stage in ("syntax", "golden", "existing_tests"))
 
     def _attempt(self, finding, proposal, current_scan):
-        if proposal.finding_id != finding["id"] or proposal.mode != "fixture":
-            raise ValueError("Only source-bound fixture proposals for this finding are enabled.")
+        if proposal.finding_id != finding["id"] or proposal.mode not in {"fixture", "mock", "replay"}:
+            raise ValueError("Only bound offline proposals for this finding are enabled; live is disabled.")
         current = project_hashes(self.working)
         target = checked_file(self.working, finding["file"])
         old_bytes = target.read_bytes()
@@ -147,14 +147,14 @@ class SecurityFixEngine:
         new = old if proposal.proposed_code is None else proposal.proposed_code
         checked_file(staged, finding["file"]).write_text(new, encoding="utf-8")
         attempt = {
-            "id": attempt_id, "finding_id": finding["id"], "file": finding["file"], "mode": "fixture",
+            "id": attempt_id, "finding_id": finding["id"], "file": finding["file"], "mode": proposal.mode,
             "ai_generated": False, "explanation": proposal.explanation, "behavior_impact": proposal.behavior_impact,
             "confidence": proposal.confidence, "review_areas": proposal.review_areas,
             "source_sha256": sha256(old.encode()).hexdigest(), "proposed_sha256": sha256(new.encode()).hexdigest(),
             "diff": "".join(difflib.unified_diff(old.splitlines(keepends=True), new.splitlines(keepends=True), fromfile=finding["file"], tofile=finding["file"])),
             "status": "open", "applied": False, "rolled_back": False, "reasons": [],
         }
-        self.evidence.append("patch_applied", f"Staged offline fixture attempt {attempt_id}; accepted copy is unchanged.", finding["file"])
+        self.evidence.append("patch_applied", f"Staged offline {proposal.mode} attempt {attempt_id}; accepted copy is unchanged.", finding["file"])
         try:
             checks = self._verify(staged)
             attempt["checks"] = checks
@@ -182,10 +182,10 @@ class SecurityFixEngine:
             elif not checks["syntax"]["passed"]:
                 attempt.update(status="fix_reverted", reasons=["Candidate syntax failed; dynamic checks were not run."])
             elif not self._passed(checks):
-                review = proposal.behavior_impact != "preserves" or finding["scanner_test"] in PROTECTED
+                review = proposal.mode != "fixture" or proposal.behavior_impact != "preserves" or finding["scanner_test"] in PROTECTED
                 attempt.update(status="needs_review" if review else "fix_reverted", reasons=["Real golden or existing tests changed/failed.", *reasons])
             elif after_scan["errors"]:
-                attempt.update(status="fix_reverted", reasons=["Rescan is incomplete."])
+                attempt.update(status="needs_review" if proposal.mode != "fixture" else "fix_reverted", reasons=["Rescan is incomplete."])
             elif proposal.disposition == "false_positive":
                 if (proposal.proposed_code is None and proposal.behavior_impact == "preserves" and not proposal.review_areas
                         and finding["scanner_test"] in {"B404", "B603"} and constant_argv_only(old) and target_remains):
@@ -204,7 +204,7 @@ class SecurityFixEngine:
                 self.committed.setdefault(finding["file"], target.read_bytes())
                 _atomic_write(target, checked_file(staged, finding["file"]).read_bytes())
                 attempt.update(status="fixed", applied=True, reasons=["Exact supported constant-shell to argv transformation; real syntax, golden, existing tests, original hashes and rescan passed. This is verified hardening, not proof of a previously exploitable vulnerability."])
-                self.evidence.append("security_fix", f"Accepted offline fixture {attempt_id} for finding {finding['id']} after real checks.", finding["file"])
+                self.evidence.append("security_fix", f"Accepted offline {proposal.mode} candidate {attempt_id} for finding {finding['id']} after real checks.", finding["file"])
         except Exception as exc:
             if attempt["applied"]:
                 _atomic_write(target, old_bytes)
@@ -222,9 +222,11 @@ class SecurityFixEngine:
         return self._redact(attempt)
 
     def run(self, generator):
+        mode = getattr(generator, "mode", "fixture")
+        if mode not in {"fixture", "mock", "replay"}: raise ValueError("Offline generator required")
         self.artifacts.mkdir(parents=True, exist_ok=False)
         baseline_hashes = project_hashes(self.working)
-        report = {"mode": "fixture", "ai_generated": False, "isolation": "docker", "status": "failed",
+        report = {"mode": mode, "ai_generated": False, "isolation": "docker", "status": "failed",
                   "attempts": [], "findings_before": [], "findings_after": [], "fixed": [], "needs_review": [], "rejected": []}
         history = {}
         try:
@@ -237,6 +239,8 @@ class SecurityFixEngine:
             history = {finding["id"]: deepcopy(finding) for finding in details}
             report["baseline_checks"] = self._verify(self.working)
             if baseline["errors"] or not self._passed(report["baseline_checks"]) or not self._original_ok():
+                if mode != "fixture":
+                    for item in history.values(): item.update(status="needs_review", note="Insufficient baseline/scan coverage; no model proposal may be accepted.")
                 raise RuntimeError("Security verification requires a passing baseline and complete scan.")
             current_scan = baseline
             for finding in details:
@@ -245,9 +249,10 @@ class SecurityFixEngine:
                 if proposal is None:
                     continue
                 proposal = FixProposal.model_validate(proposal.model_dump() if isinstance(proposal, FixProposal) else proposal)
+                if proposal.mode != mode: raise ValueError("Proposal provenance differs from generator")
                 attempt = self._attempt(finding, proposal, current_scan)
                 report["attempts"].append(attempt)
-                history[finding["id"]].update(status=attempt["status"], verification_status="real_docker_fixture_decision",
+                history[finding["id"]].update(status=attempt["status"], verification_status="real_docker_" + mode + "_decision",
                                                note=" ".join(attempt["reasons"]))
                 if attempt["applied"]:
                     current_scan = scan(self.runner, self.working, self.evidence)
@@ -269,6 +274,7 @@ class SecurityFixEngine:
                                          "note": history.get(item["id"], item)["note"]} for item in final_details]
         except Exception as exc:
             report["error_type"] = type(exc).__name__
+            report["error_code"] = getattr(exc, "code", "security_verification_failed")
             for relative, original in self.committed.items():
                 _atomic_write(checked_file(self.working, relative), original)
             for finding in history.values():

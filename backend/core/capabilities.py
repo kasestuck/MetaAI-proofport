@@ -76,6 +76,10 @@ class Capabilities:
                         "compatibility": {"pairs": [list(pair) for pair in COMPATIBILITY_PAIRS], "execution_modes": ["offline"]}},
                     "live": {"enabled": False, "reason": "live_disabled", "provider_validated": False},
                     "ai_security_fix": {"enabled": False, "reason": "not_implemented_live"},
+                    "model_workflows": {"interface":"internal_language_adapter", "public_launchable":False,
+                        "offline_response_modes":["mock","replay"], "structured_response":"ModelPatch/v1",
+                        "languages":["python","php"], "live_enabled":False, "provider_validated":False,
+                        "scope":"Offline response protocol and Docker verification. No real Meta migration/security claim or automatic paid retries."},
                     "scope": "Runtime self-tests and listed operation adapters, not universal project compatibility. Missing/unverified images cannot be selected."}
             from copy import deepcopy
             from backend.languages.registry import LanguageRegistry

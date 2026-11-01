@@ -4,6 +4,7 @@ from dataclasses import asdict
 from hashlib import sha256
 import json
 from pathlib import Path
+import shutil
 from time import monotonic
 
 from backend.core.analyzer import analyze
@@ -35,16 +36,33 @@ def _setting_path(root, settings, key):
     return path if path.is_absolute() else root / path
 
 
-def execute(run, run_id, root, settings, mode):
+def _rollback_model(run, workspace, original, migrated, verified):
+    if migrated is None or not migrated.exists() or run.verification.get("rollback"): return
+    if migrated.parent != workspace or original.parent != workspace: raise RuntimeError("Unsafe rollback workspace")
+    rejected = workspace / "model_rejected_final"
+    migrated.rename(rejected)  # Retain bytes; do not delete or touch originals.
+    shutil.copytree(verified or original, migrated)
+    run.verification["rollback"] = {"performed":True, "retained":rejected.name, "restored":"verified_translation" if verified else "copy"}
+    run.evidence.append("fix_reverted", "Unsuccessful model candidate retained; copied project restored to the last verified baseline.")
+
+
+def execute(run, run_id, root, settings, mode, *, translator=None, security_generator=None):
     from backend.core.runs import hashes_for
 
     runner = run.runner
     state = run.state
-    translator = None
+    model_path = translator is not None
+    workspace = original = migrated = verified_baseline = None
     model_calls_recorded = 0
     state.status = "running"
     terminal = "failed"
     try:
+        if model_path:
+            from backend.ai.provider import StructuredTranslator
+            if not isinstance(translator, StructuredTranslator) or mode != translator.mode or translator.client.mode not in {"mock", "replay"}:
+                raise ModelUnavailable("Explicit offline structured translator required; live is disabled.", "live_disabled")
+            if security_generator and security_generator.session is not translator.session:
+                raise ModelUnavailable("Migration/security must share one bounded model session.", "budget_required")
         if settings.get("PROOFPORT_SECURITY_FIXTURES") and mode != "fixtures":
             raise PipelineFailure("offline_only", "Security fixture verification cannot invoke live or replay model generation.")
         if not runner.available():
@@ -113,11 +131,14 @@ def execute(run, run_id, root, settings, mode):
         state.security.findings, run.verification["security_details"] = findings_for(before)
         if before["errors"]:
             run.verification["limitations"].append(f"Bandit could not parse {len(before['errors'])} Python 2 source files; original scan coverage is partial.")
-        if mode == "fixtures":
+        if model_path:
+            run.verification["limitations"] = [note for note in run.verification["limitations"] if not note.startswith("Fixture compatibility patches")]
+            run.verification["limitations"].append("Mock/replayed structured model responses are not a real AI migration; no Meta request was made.")
+        elif mode == "fixtures":
             translator = FixtureTranslator(_setting_path(root, settings, "PROOFPORT_FIXTURE_FILE"))
         else:
             raise ModelUnavailable("Live Meta AI is disabled pending separate authorization. No model request was made.")
-        run.verification["model"] = translator.client.model if translator.client else None
+        run.verification["model"] = None  # Offline configurations never certify a provider/model.
         modules = {module.name: module for module in state.modules}
         by_file = {module["file"]: module for module in analysis["order"]}
         feedback = {}
@@ -151,13 +172,18 @@ def execute(run, run_id, root, settings, mode):
                 finally:
                     if translator.client:
                         for call in translator.client.calls[model_calls_recorded:]:
-                            run.evidence.append("model_call", json.dumps(asdict(call), sort_keys=True))
+                            run.evidence.append("model_response_usage" if model_path else "model_call", json.dumps(asdict(call), sort_keys=True))
                         model_calls_recorded = len(translator.client.calls)
                         state.metrics.tokens_in = translator.client.tokens_in
                         state.metrics.tokens_out = translator.client.tokens_out
                         state.metrics.cost_usd = translator.client.cost_usd
             compile_result = invoke(runner, "python:3.12-slim", migrated, "compile", evidence=run.evidence)
             errors = compile_result["errors"] + patch_errors
+            if model_path:
+                saved = workspace / ("model_iteration_%02d" % iteration)
+                shutil.copytree(migrated, saved)
+                run.verification.setdefault("iterations", []).append({"iteration":iteration, "mode":mode, "syntax_passed":not errors,
+                    "tests_passed":None, "behavior_verified":None, "candidate":saved.name})
             if errors:
                 run.verification["target_compiles"] = False
                 _write(workspace / f"compile_{iteration}.json", errors)
@@ -176,6 +202,8 @@ def execute(run, run_id, root, settings, mode):
             expected_ids = {test["id"] for test in legacy_tests["outcomes"]}
             actual_ids = {test["id"] for test in target_tests["outcomes"]}
             suite_passes = expected_ids == actual_ids and target_tests["tests_run"] == legacy_tests["tests_run"] and all(test["status"] == "passed" for test in target_tests["outcomes"])
+            if model_path:
+                run.verification["iterations"][-1].update(tests_passed=suite_passes, behavior_verified=bool(comparisons) and all(c["matches"] for c in comparisons))
             run.verification.update(comparisons=comparisons, target_tests=target_tests, target_compiles=True)
             _write(workspace / f"comparisons_{iteration}.json", comparisons)
             _write(workspace / f"target_tests_{iteration}.json", target_tests)
@@ -208,11 +236,14 @@ def execute(run, run_id, root, settings, mode):
             if after["errors"]:
                 success = False
                 run.verification["limitations"].append("Target Bandit scan has parse errors; security coverage is incomplete.")
-        if success and settings.get("PROOFPORT_SECURITY_FIXTURES"):
+        if success and model_path:
+            verified_baseline = workspace / "verified_translation"
+            shutil.copytree(migrated, verified_baseline)
+        if success and (settings.get("PROOFPORT_SECURITY_FIXTURES") or security_generator is not None):
             from backend.security.engine import SecurityFixEngine
             from backend.security.providers import OfflineFixtureGenerator
             _write(workspace / "security_pre_fixes.json", after)
-            generator = OfflineFixtureGenerator(_setting_path(root, settings, "PROOFPORT_SECURITY_FIXTURES"))
+            generator = security_generator or OfflineFixtureGenerator(_setting_path(root, settings, "PROOFPORT_SECURITY_FIXTURES"))
             security = SecurityFixEngine(
                 runner=runner, working=migrated, original=run.source,
                 original_hashes={key.split("/", 1)[1]: value for key, value in run.originals.items()},
@@ -221,7 +252,7 @@ def execute(run, run_id, root, settings, mode):
             ).run(generator)
             run.verification["security_fix"] = security
             if security["status"] != "verified":
-                raise PipelineFailure("security_verification_failed", "Offline security verification failed; no unverified fix is accepted.")
+                raise PipelineFailure(security.get("error_code", "security_verification_failed"), "Offline security verification failed; no unverified fix is accepted.")
             after = security["scan_after"]
             run.verification["security_after"] = after
             _write(workspace / "security_after.json", after)
@@ -236,7 +267,7 @@ def execute(run, run_id, root, settings, mode):
             run.verification["comparisons"] = security["final_checks"]["golden"]["comparisons"]
             run.verification["target_tests"] = {key: value for key, value in security["final_checks"]["existing_tests"].items() if key not in {"ran", "passed"}}
             run.verification["limitations"] = [note for note in run.verification["limitations"] if not note.startswith("No automatic security fixes")]
-            run.verification["limitations"].append("Security decisions use offline fixtures and real Docker checks, not Meta AI. Behavior/configuration/crypto changes require review; a clean scan is not full security.")
+            run.verification["limitations"].append("Security decisions use offline proposals and real Docker checks, not Meta AI. Behavior/configuration/crypto changes require review; a clean scan is not full security.")
         if not success:
             raise PipelineFailure("verification_failed", "Candidate did not pass all compilation, golden, test suite, and scanner checks. No complete migration is claimed.")
         terminal = "done"
@@ -266,11 +297,17 @@ def execute(run, run_id, root, settings, mode):
             state.error = Error(code="source_changed", message="Original source hashes changed or could not be rechecked.")
             run.evidence.append("error", state.error.message)
         state.metrics.seconds = round(monotonic() - run.started, 3)
-        run.verification["model_calls"] = model_calls_recorded
+        if model_path:
+            if terminal != "done" and migrated is not None and migrated.exists():
+                _rollback_model(run, workspace, original, migrated, verified_baseline)
+            run.verification["response_calls"] = len(translator.client.calls)
+            run.verification["llm_budget"] = translator.client.budget_snapshot()
+        run.verification["model_calls"] = 0 if model_path else model_calls_recorded
         run.verification["ai_migration"] = False
         run.evidence.append("run_finished", f"Real Docker pipeline status={terminal}; provider={mode}; original hashes unchanged={state.hashes['unchanged']}.")
         state.chain_intact = run.evidence.verify()
         if not state.chain_intact:
             terminal = "failed"
             state.error = Error(code="evidence_corrupted", message="Evidence chain verification failed.")
+            if model_path: _rollback_model(run, workspace, original, migrated, verified_baseline)
         run.pending_status = terminal

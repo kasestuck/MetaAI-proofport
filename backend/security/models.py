@@ -12,7 +12,7 @@ class FixProposal(BaseModel):
     proposed_code: str | None = Field(default=None, max_length=262144)
     behavior_impact: Literal["preserves", "changes", "unknown"]
     confidence: float = Field(ge=0, le=1, allow_inf_nan=False)
-    mode: Literal["fixture", "live", "replay"] = "fixture"
+    mode: Literal["fixture", "live", "replay", "mock"] = "fixture"
     disposition: Literal["patch", "false_positive"] = "patch"
     review_areas: list[Literal["api", "configuration", "crypto", "data_format"]] = Field(default_factory=list)
 

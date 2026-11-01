@@ -35,7 +35,14 @@ class PHPJob:
     verification_level: str = "behavior"
 
 
-def execute(job, *, runner=None, images=None, evidence=None, artifacts=None, progress=None):
+def execute(job, *, runner=None, images=None, evidence=None, artifacts=None, progress=None, translator=None, security_generator=None):
+    if translator is not None:
+        from backend.ai.provider import StructuredTranslator
+        if not isinstance(translator, StructuredTranslator) or translator.session.language != "php" or translator.client.mode not in {"mock", "replay"}:
+            raise AdapterError("live_disabled", "An explicit offline PHP model session is required.")
+        if job.fixture or job.security_fixture or job.operation != "migration" or security_generator and security_generator.session is not translator.session:
+            raise ValueError("No fixture fallback or separate security budget in a model run")
+    elif security_generator is not None: raise ValueError("Security model generation requires the shared translation session")
     if job.operation not in {"migration", "compatibility", "audit"} or job.source_version not in {"7.4", "8.3"} or job.verification_level not in {"syntax", "tests", "behavior"} or type(job.max_iterations) is not int or not 1 <= job.max_iterations <= 5:
         raise ValueError("Unsupported PHP job")
     if job.operation == "migration" and (job.source_version, job.target_version) != ("7.4", "8.3"):
@@ -55,7 +62,9 @@ def execute(job, *, runner=None, images=None, evidence=None, artifacts=None, pro
             "artifact_id": artifacts.name, "migration_performed": False, "project_executed": False}
     phase = lambda value: progress(value) if progress else None
     evidence.append("run_started", "PHP offline verification; fixtures are authored candidates, not AI migration.")
-    accepted, checks = None, None
+    accepted, checks, verified_migration = None, None, None
+    if translator is not None:
+        data.update(mode="php_model_" + translator.client.mode, execution_mode="model_" + translator.client.mode)
     try:
         phase("analyzing")
         data["analysis"] = analyze_php(source, source_version=job.source_version, target_version=job.target_version, evidence=evidence).analysis
@@ -92,25 +101,38 @@ def execute(job, *, runner=None, images=None, evidence=None, artifacts=None, pro
                                     "uncovered_functions": sorted([list(item) for item in required - covered])}
                 if required - covered or data["analysis"]["diagnostics"]: raise AdapterError("insufficient_cases", "PHP function/lexical coverage is incomplete.")
             if job.operation == "migration":
-                if not job.fixture: raise ValueError("Explicit PHP fixture manifest required")
-                manifest = load_manifest(job.fixture, original)
+                if translator is None and not job.fixture: raise ValueError("Explicit PHP fixture manifest required")
+                manifest = load_manifest(job.fixture, original) if translator is None else None
+                previous = None
                 for iteration in range(job.max_iterations):
                     phase("migrating" if iteration == 0 else "fixing")
                     candidate = artifacts / ("migration_%02d" % (iteration + 1)); copy_project(original, candidate)
-                    apply_candidate(manifest, candidate, iteration)
-                    evidence.append("patch_applied", "Authored PHP fixture candidate %d staged; not yet accepted." % (iteration + 1))
+                    if translator is None:
+                        apply_candidate(manifest, candidate, iteration)
+                    else:
+                        from backend.ai.provider import failure_summary
+                        for module in data["analysis"]["modules"]:
+                            if module["is_test"] or "vendor" in Path(module["file"]).parts: continue
+                            name = module["file"]
+                            code = translator.translate(name, (original / name).read_text(encoding="utf-8"),
+                                (previous / name).read_text(encoding="utf-8") if previous else None,
+                                failure_summary(checks) if checks else None)
+                            (candidate / name).write_bytes(code.encode())
+                    evidence.append("patch_applied", "Offline %s PHP candidate %d staged; not yet accepted." % (translator.mode if translator else "fixture", iteration + 1))
                     phase("testing"); checks = verify(executor, candidate, job.target_version, profile=profile, golden=golden, baseline_tests=baseline_tests)
-                    data["iterations"].append({"iteration": iteration + 1, "mode": "fixture", "checks": checks})
+                    data["iterations"].append({"iteration": iteration + 1, "mode": translator.mode if translator else "fixture", "checks": checks})
                     evidence.append("test_result", json.dumps({"language": "php", "iteration": iteration + 1, "passed": bool(checks["passed"])}))
                     if checks["passed"]: accepted = candidate; break
+                    previous = candidate
                 if accepted is None: raise AdapterError("php_verification_failed", "No PHP fixture candidate passed all requested checks.")
                 data["migration_performed"] = True
+                verified_migration = accepted
                 phase("security"); data["security_before"] = scan_php(original, evidence)
                 data["security_after"] = scan_php(accepted, evidence)
-                if job.security_fixture:
+                if job.security_fixture or security_generator is not None:
                     sec = artifacts / "security"; sec.mkdir()
                     accepted, details, fixed_checks = verify_fixes(working=accepted, original=source, original_hashes=before,
-                        artifacts=sec, profile=profile, golden=golden, baseline_tests=baseline_tests, executor=executor, evidence=evidence, proposals_file=job.security_fixture)
+                        artifacts=sec, profile=profile, golden=golden, baseline_tests=baseline_tests, executor=executor, evidence=evidence, proposals_file=job.security_fixture, generator=security_generator)
                     data["security_fix"] = details
                     if fixed_checks: checks = fixed_checks
                     data["security_after"] = scan_php(accepted, evidence)
@@ -135,6 +157,8 @@ def execute(job, *, runner=None, images=None, evidence=None, artifacts=None, pro
                         comparisons=checks["golden"].get("comparisons", []))
     finally:
         phase("reporting")
+        if translator is not None:
+            data.update(response_calls=len(translator.client.calls), llm_budget=translator.client.budget_snapshot())
         try: data["originals_unchanged"] = source_hashes(source) == before
         except (OSError, ValueError, AdapterError): data["originals_unchanged"] = False
         if not data["originals_unchanged"]:
@@ -142,6 +166,13 @@ def execute(job, *, runner=None, images=None, evidence=None, artifacts=None, pro
         evidence.append("run_finished", "PHP offline status=%s; no model calls." % data["status"])
         data["chain_intact"] = evidence.verify()
         if not data["chain_intact"]: data.update(status="failed", error={"code": "evidence_corrupted", "message": "PHP evidence integrity failed."})
+        if translator is not None and data["status"] != "done":
+            data["rollback"] = {"performed":True, "restored":"verified_translation" if verified_migration else "original", "rejected_copies_retained":True}
+            if verified_migration:
+                data.update(accepted_copy=verified_migration.relative_to(artifacts).as_posix(), accepted_hashes=source_hashes(verified_migration))
+            else:
+                data.pop("accepted_copy", None); data.pop("accepted_hashes", None)
+            evidence.append("fix_reverted", "Unsuccessful offline model branch was not promoted; last verified copy/original retained.")
         exported = {**data, "events": evidence.since(0)}
         (artifacts / "report.json").write_text(json.dumps(exported, indent=2), encoding="utf-8")
         (artifacts / "report.html").write_text('<!doctype html><meta charset="utf-8"><title>Proofport offline PHP report</title><h1>Offline PHP verification; not AI</h1><pre>' + escape(json.dumps(exported, indent=2)) + '</pre>', encoding="utf-8")

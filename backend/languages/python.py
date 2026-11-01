@@ -17,6 +17,11 @@ def _python_only(source):
 class PythonAdapter:
     language = "python"
 
+    def migrate_ai(self, job, client, **options):
+        from backend.ai.pipeline import execute
+        if job.language != self.language: raise AdapterError("language_mismatch", "AI job language differs from adapter.")
+        return execute(job, client=client, **options)
+
     def analyze(self, source: Path, *, source_version=None, target_version=None, runner=None, evidence=None):
         # Callers provide the prepared project directory, exactly as the current
         # universal worker does (including copies of single-file inputs).

@@ -177,6 +177,11 @@ def analyze_php(source, *, source_version=None, target_version=None, evidence=No
 class PHPAdapter:
     language = "php"
 
+    def migrate_ai(self, job, client, **options):
+        from backend.ai.pipeline import execute
+        if job.language != self.language: raise AdapterError("language_mismatch", "AI job language differs from adapter.")
+        return execute(job, client=client, **options)
+
     def analyze(self, source, *, source_version=None, target_version=None, runner=None, evidence=None):
         return analyze_php(source, source_version=source_version, target_version=target_version, evidence=evidence)
 
