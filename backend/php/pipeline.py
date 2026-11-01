@@ -132,8 +132,10 @@ def execute(job, *, runner=None, images=None, evidence=None, artifacts=None, pro
                 if job.security_fixture or security_generator is not None:
                     sec = artifacts / "security"; sec.mkdir()
                     accepted, details, fixed_checks = verify_fixes(working=accepted, original=source, original_hashes=before,
-                        artifacts=sec, profile=profile, golden=golden, baseline_tests=baseline_tests, executor=executor, evidence=evidence, proposals_file=job.security_fixture, generator=security_generator)
+                        artifacts=sec, profile=profile, golden=golden, baseline_tests=baseline_tests, executor=executor, evidence=evidence, proposals_file=job.security_fixture, generator=security_generator,
+                        verification_versions=(job.source_version,job.target_version))
                     data["security_fix"] = details
+                    if not details['verified']: raise AdapterError('php_security_verification_failed','Final PHP security checks failed; promoted patches reverted.')
                     if fixed_checks: checks = fixed_checks
                     data["security_after"] = scan_php(accepted, evidence)
             else:

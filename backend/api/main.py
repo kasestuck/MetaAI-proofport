@@ -11,6 +11,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from backend.core.models import Error, RunState, StartRun
 from backend.core.report import render_html, report_data
@@ -56,6 +57,16 @@ def create_app(root: Path = ROOT, step_seconds: float = 0.2) -> FastAPI:
             await store.close()
 
     app = FastAPI(title="Proofport", version="0.1.0", lifespan=lifespan)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost", "[::1]", "testserver"])
+
+    @app.middleware("http")
+    async def local_browser_boundary(request, call_next):
+        origin = request.headers.get('origin')
+        if request.url.path.startswith('/api/') and origin and origin != str(request.base_url).rstrip('/'):
+            return JSONResponse(status_code=403,content={'error':{'code':'origin_not_allowed','message':'Use the local dashboard on the same origin as this API.'}})
+        response = await call_next(request)
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        return response
     app.state.runs = store
     app.state.control = control
 

@@ -21,7 +21,7 @@ class ReplayResponses:
                 if not isinstance(record, dict) or set(record) != {"prompt_hash", "response"}: raise ValueError
                 if not isinstance(record["prompt_hash"], str) or not re.fullmatch(r"[a-f0-9]{64}", record["prompt_hash"]): raise ValueError
                 if not isinstance(record["response"], str) or not 1 <= len(record["response"].encode()) <= 262144: raise ValueError
-        except (OSError, ValueError, TypeError, KeyError):
+        except (OSError, ValueError, TypeError, KeyError, RecursionError):
             raise ModelUnavailable("Invalid/missing bounded response replay. No fixture/network fallback.", "model_replay_unavailable") from None
         self.records, self.position = records, 0
 

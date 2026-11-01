@@ -118,9 +118,16 @@ class SecurityFixEngine:
             if other["errors"]:
                 checks["syntax"]["passed"] = False
                 compilation["errors"].extend(other["errors"])
-        if compilation["errors"]:
+        if not compilation['errors'] and self.runtime_version == '2.7':
+            api = self.runner.run(self.runtime_image,project,['python','-B','/tools/ast_api.py'])
+            self.evidence.append('sandbox_run',json.dumps({'action':'ast_api',**api.summary()},sort_keys=True))
+            data = json.loads(api.stdout) if not api.exit_code and not api.timed_out and not api.output_exceeded else {}
+            if data.get('python',[])[:2] != [2,7] or 'errors' not in data:
+                raise ValueError('Runtime AST inspection incomplete')
+            checks['runtime_api']={'ran':True,'passed':not data['errors'],'errors':data['errors']}
+        if compilation["errors"] or checks.get('runtime_api',{}).get('passed') is False:
             for stage in ("golden", "existing_tests"):
-                checks[stage] = {"ran": False, "passed": False, "reason": "Syntax check failed; no dynamic results invented."}
+                checks[stage] = {"ran": False, "passed": False, "reason": "Syntax/runtime API check failed; no dynamic results invented."}
             return checks
         try:
             actual = invoke(self.runner, self.runtime_image, project, "cases", self.cases, self.evidence)["cases"]
@@ -152,6 +159,10 @@ class SecurityFixEngine:
         target = checked_file(self.working, finding["file"])
         old_bytes = target.read_bytes()
         old = target.read_text(encoding="utf-8")
+        # _attempt is also used by the bounded live trial, outside run().
+        # Redaction must not depend on run() having initialized secret values.
+        _, bound_details = findings_for(current_scan)
+        self.secrets.update(_secret_values(old,[f for f in bound_details if f['file']==finding['file']]))
         if proposal.mode == "live":
             from backend.ai.provider import ModelSession, SecurityLiveApproval
             session = self.live_session

@@ -19,6 +19,7 @@ from dotenv import dotenv_values
 from openai import APIError, APIConnectionError, APITimeoutError, DefaultHttpxClient, OpenAI
 
 from backend.llm.budget import CallAttempt, LLMLimits, decimal_amount
+from backend.llm.context import measure
 
 
 class ModelUnavailable(RuntimeError):
@@ -71,6 +72,8 @@ class LLMClient:
         self._reserved_tokens = 0
         self._lock = Lock()
         self._halted = self._closed = False
+        self.last_input_check = None
+        self.last_rejection = None
         self._http_client = http_client
         try:
             self._price_in = decimal_amount(settings.get("PRICE_IN_PER_MTOK", "1.25"))
@@ -109,8 +112,8 @@ class LLMClient:
             raise ModelUnavailable("Disable SDK/HTTP debug logging before authorizing a live request.", "unsafe_model_logging")
         # UTF-8 bytes plus framing allowance is deliberately conservative, not
         # a verified tokenizer. Reserve the full input allowance, not this estimate.
-        estimated = len(json.dumps([{"role": "system", "content": system}, {"role": "user", "content": user}],
-                                   ensure_ascii=False).encode("utf-8")) + 256
+        self.last_input_check = measure(system,user,limits.max_input_tokens)
+        estimated = self.last_input_check['conservative_input_units']
         tokens = limits.max_input_tokens + limits.max_output_tokens
         cost = (limits.max_input_tokens * self._price_in + limits.max_output_tokens * self._price_out) / 1_000_000
         if estimated > limits.max_input_tokens:
@@ -160,7 +163,12 @@ class LLMClient:
             # Mock mode never consumes tokens or incurs model charges.
             tokens_in = tokens_out = 0
         else:
-            self._reserve(system, user, sha256(prompt.encode("utf-8")).hexdigest())
+            try:
+                self._reserve(system, user, sha256(prompt.encode("utf-8")).hexdigest())
+            except ModelUnavailable as exc:
+                self._halted = True
+                self.last_rejection = exc.code
+                raise
             options = {"response_format": {"type": "json_object"}} if json_mode else {}
             try:
                 if self._client is None:
@@ -234,7 +242,7 @@ class LLMClient:
                         raise ValueError
                 self.attempts[-1] = replace(self.attempts[-1], outcome="ok")
                 return answer
-            except (APIError, ValueError, TypeError, AttributeError, ModelUnavailable) as exc:
+            except (APIError, ValueError, TypeError, AttributeError, RecursionError, ModelUnavailable) as exc:
                 self._halted = True
                 error = exc if isinstance(exc, ModelUnavailable) else self._api_failure(exc) if isinstance(exc, APIError) else ModelUnavailable(
                     "The model returned invalid JSON/response/usage. Details withheld; reserved budget retained.", "model_invalid_response")
@@ -292,7 +300,8 @@ class LLMClient:
     def budget_snapshot(self):
         return {"attempts": len(self.attempts), "reserved_tokens": self._reserved_tokens,
                 "reserved_cost_usd": float(self._reserved_cost), "reported_cost_usd": self.cost_usd,
-                "usage_complete": all(item.usage_known for item in self.attempts), "stopped": self._halted}
+                "usage_complete": all(item.usage_known for item in self.attempts), "stopped": self._halted,
+                "input_check":self.last_input_check, "preflight_rejection":self.last_rejection}
 
     def close(self) -> None:
         with self._lock:

@@ -25,6 +25,20 @@ LIMITATIONS = ("Limited lexical sink rules, not interprocedural taint analysis o
                "Literal values/source snippets are withheld. Coverage is PHP files only, excluding tests/vendor.")
 
 
+def fully_escaped(statement):
+    # A sanitizer elsewhere in echo's expression does not escape other operands.
+    tail=statement[1:]
+    if len(tail)<3 or tail[0].kind!='name' or tail[0].value.lower() not in {'htmlspecialchars','htmlentities'} or tail[1].value!='(':
+        return False
+    depth=0
+    for index,token in enumerate(tail[1:],1):
+        if token.value=='(': depth+=1
+        elif token.value==')':
+            depth-=1
+            if depth==0: return index==len(tail)-1
+    return False
+
+
 def scan_php(source, evidence=None):
     source, files = inventory(source)
     analysis = analyze_php(source).analysis
@@ -58,7 +72,7 @@ def scan_php(source, evidence=None):
                 if word in {"readfile", "file_get_contents", "fopen"} and dynamic: selected.append("PHP-PATH")
                 if word == "move_uploaded_file": selected.append("PHP-UPLOAD")
                 if word in {"md5", "sha1"} or (word == "hash" and index + 2 < len(tokens) and tokens[index + 2].kind == "string" and tokens[index + 2].value.lower() in {"md5", "sha1"}): selected.append("PHP-HASH")
-            if word in {"echo", "print"} and dynamic and not any(t.value.lower() in {"htmlspecialchars", "htmlentities"} for t in statement): selected.append("PHP-XSS")
+            if word in {"echo", "print"} and dynamic and not fully_escaped(statement): selected.append("PHP-XSS")
             if token.kind == "variable" and any(part in token.value.lower() for part in ("password", "secret", "api_key", "token")):
                 if following == "=" and index + 2 < len(tokens) and tokens[index + 2].kind == "string" and tokens[index + 2].value:
                     selected.append("PHP-SECRET")

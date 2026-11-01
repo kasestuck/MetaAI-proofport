@@ -46,5 +46,5 @@ def apply_candidate(manifest, working, iteration):
 
 def constant_command_policy(old, new, proposal):
     # Finite allowlist, never trust behavior_impact or warning disappearance alone.
-    return (old == OLD_COMMAND and new == NEW_COMMAND and proposal.get("policy") == "constant_argv"
+    return (old.replace('\r\n','\n') == OLD_COMMAND and new.replace('\r\n','\n') == NEW_COMMAND and proposal.get("policy") == "constant_argv"
             and proposal.get("behavior_impact") == "preserves" and not proposal.get("review_areas"))

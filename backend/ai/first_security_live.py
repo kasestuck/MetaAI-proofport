@@ -164,7 +164,7 @@ def execute(workspace, env_file, *, acknowledged=False, runner=None, client=None
                 or client.base_url != settings['MODEL_BASE_URL'] or client._api_key != settings['MODEL_API_KEY']
                 or client._price_in != Decimal('1.25') or client._price_out != Decimal('4.25')):
             raise ModelUnavailable('Unexpected security client/configuration.', 'live_not_authorized')
-        session = ModelSession(client,'python',evidence=evidence,response_dir=workspace,
+        session = ModelSession(client,'python',evidence=evidence,response_dir=workspace,compact_security=True,
             live_approval=SecurityLiveApproval(FILE,m['source_sha256'],m['finding']['id']))
         generator = LLMFixGenerator(session=session,rules=('B307',),scopes=('parse_value',),max_proposals=2)
         engine = SecurityFixEngine(runner=runner,working=working,original=SOURCE,original_hashes=m['original_hashes'],
@@ -185,6 +185,7 @@ def execute(workspace, env_file, *, acknowledged=False, runner=None, client=None
             if iteration < 2:
                 previous = proposal.proposed_code
                 feedback = {'syntax':checks.get('syntax'),
+                    'runtime_api':checks.get('runtime_api'),
                     'existing_tests':{'passed':checks.get('existing_tests',{}).get('passed')},
                     'golden':{'passed':checks.get('golden',{}).get('passed')},
                     'failing_cases':[{'input':next(c for c in cases if c['id']==f['id']),
@@ -192,6 +193,7 @@ def execute(workspace, env_file, *, acknowledged=False, runner=None, client=None
                                     for f in checks.get('golden',{}).get('comparisons',[]) if not f['matches']],
                     'repair_requested':True,'manual_review_required':True}
     except (ModelUnavailable,SandboxError,ValueError,OSError) as exc:
+        report['status'] = 'failed'  # Preserve finding's review status separately.
         report['error'] = {'code':getattr(exc,'code','security_verification_failed')}
     finally:
         client.close()

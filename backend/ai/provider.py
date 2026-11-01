@@ -9,9 +9,10 @@ from pathlib import PurePosixPath
 import re
 
 from backend.ai.models import ModelPatch
-from backend.ai.prompts import PYTHON, PYTHON_REPAIR, PHP, PHP_MODULE, PHP_REPAIR, SECURITY, SECURITY_EVAL, BOUNDARY
+from backend.ai.prompts import PYTHON, PYTHON_REPAIR, PHP, PHP_MODULE, PHP_REPAIR, SECURITY, SECURITY_EVAL, SECURITY_EVAL_PY27, BOUNDARY
 from backend.llm.client import LLMClient, ModelUnavailable, _unique_json_keys, _invalid_json_constant
 from backend.llm.budget import LLMLimits
+from backend.llm.context import measure, compact_failures, previous_excerpt, schema_without_titles
 
 
 def _validate_trial_limits(limits):
@@ -113,7 +114,7 @@ class PrivateContext:
 
 
 class ModelSession:
-    def __init__(self, client, language, *, evidence=None, live_approval=None, response_dir=None, case_feedback=False):
+    def __init__(self, client, language, *, evidence=None, live_approval=None, response_dir=None, case_feedback=False, compact_security=False):
         if not isinstance(client, LLMClient) or language not in {"python", "php"}:
             raise ModelUnavailable("Supply an explicit LLMClient and supported language.")
         # P8 adds an explicit single-module operator approval after the real
@@ -131,9 +132,10 @@ class ModelSession:
         self.responses = []
         self.live_approval = live_approval
         self.response_dir = response_dir
-        if type(case_feedback) is not bool:
-            raise ModelUnavailable("Detailed case feedback needs an explicit boolean opt-in.", "model_context_invalid")
+        if type(case_feedback) is not bool or type(compact_security) is not bool:
+            raise ModelUnavailable("Context controls need explicit boolean opt-ins.", "model_context_invalid")
         self.case_feedback = case_feedback
+        self.compact_security = compact_security
 
     def request(self, task, file, source, *, previous=None, failures=None, finding=None):
         if self.stopped: raise ModelUnavailable("Model response session stopped; no automatic retry.", "model_session_stopped")
@@ -162,17 +164,35 @@ class ModelSession:
                    "failures": self.private.clean(failures), "schema":ModelPatch.model_json_schema()}
         if isinstance(self.live_approval, SecurityLiveApproval):
             context["target_version"] = self.live_approval.runtime_version
+        if task == 'security': context['source_version'] = context['target_version']
         if finding:
             context["finding"] = self.private.clean({k:finding[k] for k in ("id","file","line","scope","scanner_test","cwe","severity","confidence","description") if k in finding})
         detailed_repair = task == "translate" and previous is not None and self.case_feedback
         if task == "security":
-            instructions = SECURITY + (SECURITY_EVAL if finding.get("scanner_test") == "B307" and file == "legacy_shop/config.py" else "")
+            instructions = SECURITY
+            if finding.get('scanner_test') == 'B307' and file == 'legacy_shop/config.py':
+                instructions += SECURITY_EVAL
+                if context['target_version'] == '2.7': instructions += SECURITY_EVAL_PY27
         elif self.language == "python": instructions = PYTHON_REPAIR if detailed_repair else PYTHON
         else: instructions = PHP_REPAIR if detailed_repair else PHP_MODULE if self.case_feedback else PHP
         system = instructions + "\n" + BOUNDARY
+        if task == 'security' and previous and self.compact_security:
+            context['schema'] = schema_without_titles(context['schema'])
+            context['failures'] = self.private.clean(compact_failures(failures))
+            rendered = json.dumps(context,sort_keys=True,ensure_ascii=True,separators=(',',':'))
+            if not measure(system,rendered,self.client.limits.max_input_tokens)['within_allowance']:
+                context['previous'] = None
+                context['previous_excerpt'] = self.private.clean(previous_excerpt(previous,finding))
+                context['context_reduction'] = 'Full original retained; previous candidate replaced by labelled diagnostic excerpts. Generate a complete file from original; do not splice excerpts.'
+            rendered = json.dumps(context,sort_keys=True,ensure_ascii=True,separators=(',',':'))
+            if self.evidence:
+                self.evidence.append('model_context_budget',json.dumps({**measure(system,rendered,self.client.limits.max_input_tokens),
+                    'reduction':context.get('context_reduction','compact_observations_full_previous')},sort_keys=True))
+        else:
+            rendered = json.dumps(context,sort_keys=True,ensure_ascii=True)
         count = len(self.client.attempts)
         try:
-            text = self.client.complete(system, json.dumps(context, sort_keys=True, ensure_ascii=True), json_mode=True)
+            text = self.client.complete(system, rendered, json_mode=True)
             if self.response_dir is not None:
                 # Preserve returned content, including schema-invalid candidates,
                 # only after credential/private-context redaction. Never execute it.

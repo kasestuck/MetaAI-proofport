@@ -12,7 +12,16 @@ from backend.php.security import scan_php
 from backend.php.verification import verify
 
 
-def verify_fixes(*, working, original, original_hashes, artifacts, profile, golden, baseline_tests, executor, evidence, proposals_file=None, generator=None):
+def verify_fixes(*, working, original, original_hashes, artifacts, profile, golden, baseline_tests, executor, evidence, proposals_file=None, generator=None, verification_versions=('8.3',)):
+    if not isinstance(verification_versions,tuple) or not verification_versions or len(set(verification_versions))!=len(verification_versions) or any(v not in {'7.4','8.3'} for v in verification_versions):
+        raise ValueError('Explicit PHP verification runtimes required')
+    initial_working = working
+    def check_versions(project):
+        results={v:verify(executor,project,v,profile=profile,golden=golden,baseline_tests=baseline_tests) for v in verification_versions}
+        primary=dict(results['8.3'] if '8.3' in results else results['7.4'])
+        primary['passed']=all(c['passed'] for c in results.values())
+        primary['runtime_checks']=results
+        return primary
     if (proposals_file is None) == (generator is None): raise ValueError("Select exactly one explicit proposal source")
     mode = getattr(generator, "mode", "fixture")
     if mode not in {"fixture", "mock", "replay"}: raise ValueError("Live PHP security generation is disabled")
@@ -26,7 +35,7 @@ def verify_fixes(*, working, original, original_hashes, artifacts, profile, gold
         if generator is None:
             yield from data["proposals"]
             return
-        baseline = verify(executor, working, "8.3", profile=profile, golden=golden, baseline_tests=baseline_tests)
+        baseline = check_versions(working)
         if not baseline["passed"] or initial["errors"]:
             from backend.languages.base import AdapterError
             raise AdapterError("needs_review", "Insufficient passing baseline/scan coverage; no model patch may be applied.")
@@ -36,7 +45,7 @@ def verify_fixes(*, working, original, original_hashes, artifacts, profile, gold
             if item is None: continue
             if item.finding_id != finding["id"] or item.mode != mode: raise ValueError("Unbound PHP proposal")
             yield {**item.model_dump(), "file":finding["file"], "scanner_test":finding["scanner_test"], "scope":finding["scope"],
-                   "source_sha256":sha256(source.encode()).hexdigest(), "policy":"constant_argv"}
+                   "source_sha256":sha256((working / finding["file"]).read_bytes()).hexdigest(), "policy":"constant_argv"}
     attempts, accepted, last_checks = [], [], None
     for index, proposal in enumerate(proposals()):
         relative_php(proposal["file"])
@@ -51,7 +60,7 @@ def verify_fixes(*, working, original, original_hashes, artifacts, profile, gold
         attempt_root = artifacts / ("attempt_%02d" % (index + 1)); attempt_root.mkdir()
         candidate = attempt_root / "project"; copy_project(working, candidate)
         (candidate / proposal["file"]).write_bytes(new.encode())
-        checks = verify(executor, candidate, "8.3", profile=profile, golden=golden, baseline_tests=baseline_tests)
+        checks = check_versions(candidate)
         rescan = scan_php(candidate, evidence) if checks["syntax"]["passed"] else None
         supported = constant_command_policy(old.decode("utf-8"), new, proposal)
         anchor = lambda f: (f["scanner_test"], f["file"], f["scope"])
@@ -85,9 +94,26 @@ def verify_fixes(*, working, original, original_hashes, artifacts, profile, gold
         if not originals_ok or not previous_ok: raise ValueError("Original/accepted project changed during security verification")
         if accepted_patch:
             working, last_checks = candidate, checks; accepted.append(finding["id"])
+    accepted_hashes = source_hashes(working)
     final = scan_php(working, evidence)
+    final_checks = check_versions(working)
+    valid = (not final['errors'] and final['coverage']=='limited_lexical' and final_checks['passed']
+             and source_hashes(working)==accepted_hashes and source_hashes(original)==original_hashes and evidence.verify())
+    if not valid:
+        working=initial_working
+        accepted=[]; last_checks=None
+        for attempt in attempts:
+            if attempt['applied']:
+                attempt.update(status='fix_reverted',applied=False,rolled_back=True)
+                attempt['reasons'].append('Final PHP validation failed; promotion reverted to baseline.')
+        for finding in decisions.values():
+            if finding['status']=='fixed': finding['status']='fix_reverted'
+        if evidence.verify(): evidence.append('fix_reverted','Final PHP checks failed; all promoted patches reverted to baseline. Retained candidates were not deleted.')
+    for index,attempt in enumerate(attempts):
+        (artifacts / ('attempt_%02d' % (index+1)) / 'attempt.json').write_text(json.dumps(attempt,indent=2),encoding='utf-8')
     return working, {"mode": mode, "not_ai": True, "isolation": "docker", "attempts": attempts,
-                     "findings_before": initial["findings"], "findings_after": final["findings"], "decisions": list(decisions.values()),
+                     "findings_before": initial["findings"], "findings_after": final["findings"] if valid else [], "decisions": list(decisions.values()),
                      "fixed": accepted, "needs_review": [f["id"] for f in decisions.values() if f["status"] == "needs_review"],
                      "rejected": [a["finding_id"] for a in attempts if not a["applied"]], "source_unchanged": source_hashes(original) == original_hashes,
-                     "evidence_chain_intact": evidence.verify(), "verified": True, "scan_after": {"results": final["findings"], "errors": final["errors"]}}, last_checks
+                     "evidence_chain_intact": evidence.verify(), "verified": valid, "final_checks":final_checks,
+                     "scan_after": {"results": final["findings"] if valid else [], "errors": final["errors"]}}, last_checks

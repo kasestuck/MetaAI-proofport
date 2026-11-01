@@ -40,10 +40,15 @@ class ControlPlane:
         return path
 
     def catalog(self):
+        def available(entries,key):
+            try:
+                self.profile(entries,key,entries[key][0],'profile_id')
+                return True
+            except (ControlError,OSError): return False
         data = {"root_id": "workspace", "projects": self.projects.snapshot(),
-                "cases_profiles": [{"id": key, "project_id": value[0], "available": (self.root / value[1]).is_file()} for key, value in self.CASES.items()],
-                "fixture_profiles": [{"id": key, "project_id": value[0], "available": (self.root / value[1]).is_file()} for key, value in self.FIXTURES.items()],
-                "security_fix_profiles": [{"id": key, "project_id": value[0], "available": (self.root / value[1]).is_file(), "mode": "fixture"} for key, value in self.SECURITY_FIXTURES.items()]}
+                "cases_profiles": [{"id": key, "project_id": value[0], "available": available(self.CASES,key)} for key, value in self.CASES.items()],
+                "fixture_profiles": [{"id": key, "project_id": value[0], "available": available(self.FIXTURES,key)} for key, value in self.FIXTURES.items()],
+                "security_fix_profiles": [{"id": key, "project_id": value[0], "available": available(self.SECURITY_FIXTURES,key), "mode": "fixture"} for key, value in self.SECURITY_FIXTURES.items()]}
         for project in data["projects"]:
             project["available_profiles"] = {kind: [p["id"] for p in data[kind + "_profiles"] if p["project_id"] == project["project_id"] and p["available"]]
                                              for kind in ("cases", "fixture")}

@@ -59,7 +59,7 @@ def test_transaction_unit_decisions_rollback_and_rescan(tmp_path,monkeypatch):
     seen=[]
     def verified(executor,candidate,*args,**kwargs):
         seen.append(candidate)
-        return [fake_checks(),fake_checks(passed=False,golden=False),fake_checks(syntax=False)][len(seen)-1]
+        return [fake_checks(),fake_checks(passed=False,golden=False),fake_checks(syntax=False),fake_checks()][len(seen)-1]
     monkeypatch.setattr("backend.php.fixes.verify",verified)
     artifacts=tmp_path/"attempts"; artifacts.mkdir(); evidence=Evidence()
     accepted,details,_=verify_fixes(working=working,original=DEMO,original_hashes=before,artifacts=artifacts,
@@ -67,6 +67,7 @@ def test_transaction_unit_decisions_rollback_and_rescan(tmp_path,monkeypatch):
     assert [a["status"] for a in details["attempts"]]==["fixed","needs_review","fix_reverted"]
     assert len(details["fixed"])==1 and len(details["findings_after"])==9
     assert accepted==seen[0] and all(p.exists() for p in seen)
+    assert seen[-1]==accepted and details['verified'] and details['final_checks']['passed']
     assert source_hashes(DEMO)==before and source_hashes(working)==before and evidence.verify()
     assert "sha256" not in (accepted/"src/security.php").read_text()
 
