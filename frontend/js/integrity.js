@@ -34,7 +34,8 @@
    * @returns {Promise<{status:"ok"|"broken"|"unavailable"|"empty", count:number, brokenAt?:number, reason?:string}>}
    */
   async function verifyChain(events) {
-    const list = (events || []).slice().sort((a, b) => a.seq - b.seq);
+    if (!Array.isArray(events)) return { status: "broken", count: 0, reason: "Evidence must be an array." };
+    const list = events.slice(); // Verify the supplied order; never repair corrupted evidence.
     if (!list.length) return { status: "empty", count: 0 };
     if (!(window.crypto && crypto.subtle)) {
       return { status: "unavailable", count: list.length, reason: "WebCrypto is unavailable (insecure context)." };
@@ -42,6 +43,10 @@
     let previous = ZERO;
     for (let i = 0; i < list.length; i++) {
       const entry = list[i];
+      if (!entry || typeof entry !== "object" || !Number.isSafeInteger(entry.seq)
+          || typeof entry.prev_hash !== "string" || typeof entry.entry_hash !== "string") {
+        return { status: "broken", count: list.length, reason: "Malformed evidence entry." };
+      }
       if (entry.seq !== i + 1) return { status: "broken", count: list.length, brokenAt: entry.seq, reason: `Sequence gap: expected ${i + 1}, found ${entry.seq}.` };
       if (entry.prev_hash !== previous) return { status: "broken", count: list.length, brokenAt: entry.seq, reason: "prev_hash does not match the previous entry_hash." };
       const payload = {};

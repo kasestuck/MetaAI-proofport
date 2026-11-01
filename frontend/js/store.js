@@ -395,6 +395,8 @@
     if (!data || typeof data !== "object") return "The file is not a JSON object.";
     if (!data.state || typeof data.state !== "object" || !Array.isArray(data.state.modules)) return "Missing `state.modules`; this is not a Proofport report.";
     if (!Array.isArray(data.events)) return "Missing `events` array.";
+    if (data.events.some((e) => !e || typeof e !== "object" || !Number.isSafeInteger(e.seq)
+      || typeof e.prev_hash !== "string" || typeof e.entry_hash !== "string")) return "Malformed evidence entry.";
     if (!data.settings || typeof data.settings !== "object") return "Missing `settings`.";
     if (typeof data.simulation !== "boolean") return "Missing `simulation` flag.";
     return null;
@@ -425,7 +427,12 @@
     const run = newRun(match ? match[1] : "saved-report", null, "replay");
     run.fileName = fileName;
     applyState(run, data.state);
-    applyEvents(run, data.events);
+    // Replay must preserve duplicates/order. Polling deduplication would hide
+    // corruption and could turn an invalid saved chain into a green result.
+    run.events = data.events.slice();
+    run.seqs = new Set(run.events.map((e) => e.seq));
+    run.cursor = run.events.length ? run.events[run.events.length - 1].seq : 0;
+    verifyChainLater(run);
     run.report = data;
     run.reportStatus = "ready";
     run.finalized = true;
