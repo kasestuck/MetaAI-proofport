@@ -1,5 +1,14 @@
 # P4.1: API Control Plane
 
+P6.2/P6.3 update on `integration/p4`: optional explicit `language: "php"`
+requests and `security_fix_profile_id` now dispatch to verified offline PHP
+workers. Python requests/defaults, root Python operation matrix and all five
+legacy endpoints remain compatible. PHP readiness requires a current local
+image/code/demo-bound E2E receipt; image presence alone never enables migration.
+See [PHP_OFFLINE.md](PHP_OFFLINE.md) for the current exact PHP contract, profiles,
+JSON examples, tri-state results, proof command and limitations. The P6.1
+description immediately below is historical and superseded for explicit PHP.
+
 P6.1 additive discovery update on integration/p4: GET capabilities now includes
 optional `languages` metadata; GET projects and project resolution add language
 inventory, nullable source/target versions and readiness. GET projects also adds

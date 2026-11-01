@@ -1,5 +1,17 @@
 # Architecture audit and staged implementation plan
 
+## P6.2/P6.3 offline PHP execution and cybersecurity
+
+`backend/php/` and the fixed trusted Docker PHP harness now implement actual
+7.4.33 → 8.3.36 fixture migration, typed golden comparison, separate syntax/tests/
+behavior evidence, native local tests, limited PHP security rules and narrow
+transactional fixture fixes. PHPAdapter delegates these methods without replacing
+Python. Optional PHP RunSpec/control dispatch shares the existing busy gate and
+legacy state/report envelope. Local code/demo/image/artifact-bound E2E receipts
+gate PHP capabilities; GET/preflight do not execute projects. Live Meta remains
+disabled. Full contract, retained artifacts, scope and actual results are in
+[PHP_OFFLINE.md](PHP_OFFLINE.md). Older descriptions below are historical.
+
 ## P6.1 language foundation: 2026-11-01
 
 Added internal language adapters without replacing the Python workers or RunSpec.

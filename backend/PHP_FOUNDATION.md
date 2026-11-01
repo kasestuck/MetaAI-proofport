@@ -1,5 +1,9 @@
 # P6.1 — language adapters and PHP analyzer
 
+This document records the P6.1 milestone. For the implemented P6.2/P6.3 runtime,
+scanner, fixes, API contract and real Docker results, see [PHP_OFFLINE.md](PHP_OFFLINE.md).
+Its earlier disabled-operation/Docker-unavailable statements describe that stage.
+
 Implemented on `integration/p4`, 2026-11-01. This milestone is a foundation,
 not PHP migration, compatibility certification, security audit or remediation.
 No Meta API requests, image pulls, dependency installs or frontend edits.
