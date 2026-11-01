@@ -78,5 +78,7 @@ class Capabilities:
                     "ai_security_fix": {"enabled": False, "reason": "not_implemented_live"},
                     "scope": "Runtime self-tests and listed operation adapters, not universal project compatibility. Missing/unverified images cannot be selected."}
             from copy import deepcopy
+            from backend.languages.registry import LanguageRegistry
+            data["languages"] = LanguageRegistry().snapshot(data, probe=probe, docker=docker)
             self.cached, self.checked = deepcopy(data), monotonic()
             return data

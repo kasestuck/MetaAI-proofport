@@ -37,9 +37,13 @@ class ControlPlane:
         return path
 
     def catalog(self):
-        return {"root_id": "workspace", "projects": self.projects.snapshot(),
+        data = {"root_id": "workspace", "projects": self.projects.snapshot(),
                 "cases_profiles": [{"id": key, "project_id": value[0], "available": (self.root / value[1]).is_file()} for key, value in self.CASES.items()],
                 "fixture_profiles": [{"id": key, "project_id": value[0], "available": (self.root / value[1]).is_file()} for key, value in self.FIXTURES.items()]}
+        for project in data["projects"]:
+            project["available_profiles"] = {kind: [p["id"] for p in data[kind + "_profiles"] if p["project_id"] == project["project_id"] and p["available"]]
+                                             for kind in ("cases", "fixture")}
+        return data
 
     def prepare(self, request):
         if request.execution_mode == "live":

@@ -90,7 +90,7 @@ class ProjectCatalog:
         self.root = Path(root).resolve()
         self.entries = dict(self.DEFAULTS)
 
-    def resolve(self, value, *, relative_only=False):
+    def resolve(self, value, *, relative_only=False, inventory_only=False):
         if not isinstance(value, str) or not value or "\0" in value or value.startswith(("~", "\\\\", "//")):
             raise ControlError("unsafe_project_path", "Choose a workspace-relative project path.", 403)
         windows = PureWindowsPath(value)
@@ -119,29 +119,38 @@ class ProjectCatalog:
         canonical = path.resolve()
         if not canonical.is_relative_to(self.root):
             raise ControlError("project_outside_root", "Resolved project escapes the workspace.", 403)
-        if not canonical.exists() or not (canonical.is_dir() or (canonical.is_file() and canonical.suffix == ".py")):
+        suffixes = {".py", ".php", ".phtml"} if inventory_only else {".py"}
+        if canonical.is_file() and canonical.suffix.lower() in {".php", ".phtml"} and not inventory_only:
+            raise ControlError("language_not_enabled", "PHP run operations are not implemented; only read-only analysis is available.", 422, "project_id")
+        if not canonical.exists() or not (canonical.is_dir() or (canonical.is_file() and (canonical.suffix in suffixes or (inventory_only and canonical.suffix.lower() in {".php", ".phtml"})))):
             raise ControlError("source_not_found", "The source folder or Python file does not exist.", 400)
         try:
-            self.inspect(canonical)
+            self.inspect(canonical, inventory_only=inventory_only)
         except OSError:
             raise ControlError("source_unreadable", "Project files could not be inspected.", 400) from None
         return canonical
 
-    def inspect(self, source):
+    def inspect(self, source, *, inventory_only=False):
         files = source_files(source, max_files=self.MAX_FILES, max_bytes=self.MAX_BYTES)
         if len(files) > self.MAX_FILES or sum(path.stat().st_size for path in files) > self.MAX_BYTES:
             raise ControlError("project_limit_exceeded", "Project exceeds 2000 files or 16 MiB.", 413)
-        if not any(path.suffix == ".py" for path in files):
+        php = any(path.suffix.lower() in {".php", ".phtml"} for path in files)
+        python = any(path.suffix == ".py" for path in files)
+        if php and not python and not inventory_only:
+            raise ControlError("language_not_enabled", "PHP run execution is disabled in P6.1; this endpoint executes the Python pipeline only.", 422, "project_id")
+        if not python and not (inventory_only and php):
             raise ControlError("source_empty", "The source folder contains no Python modules.", 400)
         return files
 
     def register(self, value):
-        path = self.resolve(value, relative_only=True)
+        path = self.resolve(value, relative_only=True, inventory_only=True)
         relative = path.relative_to(self.root).as_posix()
         project_id = next((key for key, entry in self.entries.items() if entry == relative),
                           "project_" + sha256(relative.encode()).hexdigest()[:24])
         self.entries[project_id] = relative
-        return {"project_id": project_id, "relative_path": relative, "kind": "file" if path.is_file() else "directory"}
+        from backend.languages.registry import project_language
+        return {"project_id": project_id, "relative_path": relative, "kind": "file" if path.is_file() else "directory",
+                **project_language(path, self.inspect(path, inventory_only=True))}
 
     def get(self, project_id):
         if project_id not in self.entries:
@@ -152,9 +161,13 @@ class ProjectCatalog:
         entries = []
         for project_id, relative in list(self.entries.items()):
             try:
-                self.get(project_id)
-                entries.append({"project_id": project_id, "relative_path": relative, "available": True})
+                from backend.languages.registry import project_language
+                source = self.resolve(relative, inventory_only=True)
+                entries.append({"project_id": project_id, "relative_path": relative, "available": True,
+                                **project_language(source, self.inspect(source, inventory_only=True))})
             except (ControlError, OSError) as exc:
                 entries.append({"project_id": project_id, "relative_path": relative, "available": False,
-                                "reason": getattr(exc, "code", "source_unreadable")})
+                                "reason": getattr(exc, "code", "source_unreadable"), "language": "unknown", "languages": [],
+                                "source_version": None, "target_version": None, "supported_operations": [],
+                                "readiness": {"can_start": False, "reason": getattr(exc, "code", "source_unreadable")}})
         return entries

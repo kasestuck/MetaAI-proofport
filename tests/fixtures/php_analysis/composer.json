@@ -1,0 +1,5 @@
+{
+  "name": "proofport/original-analyzer-fixture",
+  "require": {"php": ">=7.4 <8.4"},
+  "scripts": {"example": "DO NOT EXECUTE: fixture metadata only"}
+}
