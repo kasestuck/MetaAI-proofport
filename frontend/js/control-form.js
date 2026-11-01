@@ -5,6 +5,7 @@
   const C = PP.control;
   function mount(host) {
     const operationHost = h("div", { class: "op-grid" });
+    const languageStatus = h("div", { class: "field-hint", role: "status", "aria-live": "polite" });
     const fields = {};
     const wrappers = {};
     function select(name, label) {
@@ -13,7 +14,7 @@
       wrappers[name] = h("label", { class: "field" }, h("span", { class: "field-label" }, label), el);
       return wrappers[name];
     }
-    const iterations = fields.max_iterations = h("input", { class: "input num", type: "number", min: "1", max: "5", step: "1", value: "5",
+    const iterations = fields.max_iterations = h("input", { class: "input num", id: "control-max_iterations", type: "number", min: "1", max: "5", step: "1", value: "5",
       oninput: () => C.edit({ max_iterations: iterations.value }) });
     wrappers.max_iterations = h("label", { class: "field" }, h("span", { class: "field-label" }, "Migration iterations (1–5)"), iterations);
     const path = h("input", { class: "input mono", type: "text", placeholder: "samples/my_project", autocomplete: "off", spellcheck: false });
@@ -30,14 +31,15 @@
     const pending = h("div", { class: "stack" });
     const status = h("div", { class: "stack" });
     const form = h("form", { class: "stack", novalidate: true, onsubmit: (e) => { e.preventDefault(); C.submit(false); } },
-      operationHost,
+      select("language", "Project language"), languageStatus, operationHost,
       h("div", { class: "grid grid-2" },
         select("project_id", "Registered project"),
         select("source_version", "Source Python (verified runtime)"),
         select("target_version", "Target Python (verified runtime)"),
         select("verification_level", "Compatibility verification"),
         select("fixture_profile_id", "Offline fixture profile"),
-        select("cases_profile_id", "Golden cases profile"), wrappers.max_iterations),
+        select("cases_profile_id", "Golden cases profile"),
+        select("security_fix_profile_id", "Optional security fixture checks · not AI"), wrappers.max_iterations),
       h("details", { class: "disclosure", dataset: { key: "control-custom-project" } },
         h("summary", null, "Register another workspace project"),
         h("div", { class: "disclosure-body stack" },
@@ -74,11 +76,18 @@
         : [badge("Control API v1", "info"), h("span", { class: "field-hint" }, " Readiness is checked again when a run is created.")]));
       if (!v1) return;
       const choices = C.choices();
+      const php = d.language === "php";
+      const language = php ? "PHP" : "Python";
+      const languageReason = C.languageReason();
+      const policy = C.languageCaps();
+      const phpEntry = c.capabilities.languages && c.capabilities.languages.php;
+      languageStatus.textContent = languageReason || (php ? "PHP readiness is based on the local backend proof. Static audit does not execute project code."
+        : phpEntry && !phpEntry.readiness.can_start ? "PHP unavailable: " + (phpEntry.readiness.reason || "No verified operations") : "Operations and versions come from backend capabilities.");
       const current = choices.find((o) => o.id === d.choice);
       const simulation = current && current.mode === "simulation";
       const migration = current && current.operation === "migration" && !simulation;
       const compatibility = current && current.operation === "compatibility";
-      const opSig = JSON.stringify([choices, d.choice, c.loading, state.starting]);
+      const opSig = JSON.stringify([choices, d.choice, d.language, c.loading, state.starting]);
       if (operationSignature !== opSig) {
         operationSignature = opSig;
         operationHost.replaceChildren(...choices.map((o) => h("button", { class: "op-card", type: "button",
@@ -87,17 +96,20 @@
         h("strong", null, o.label), h("p", { class: "op-text" }, o.reason || (o.mode === "simulation"
           ? "Demo only: simulated tests, migration and metrics."
           : o.mode === "offline_fixtures" ? "Pre-written patches verified in Docker; not AI migration."
-            : "Offline checks in Docker; no AI or code translation.")))));
+            : php && o.operation === "audit" ? "Limited PHP static rules; no project execution, Docker or AI required."
+              : "Offline checks in Docker; no AI or code translation.")))));
       }
-      const sig = JSON.stringify([d, c.projects, c.capabilities.runtimes, c.loading, state.starting]);
+      const sig = JSON.stringify([d, c.projects, policy, c.loading, state.starting]);
       if (optionsSignature !== sig) {
         optionsSignature = sig;
-        options("project_id", c.projects.projects.map((p) => ({ value: p.project_id,
+        options("language", [{ value: "python", label: "Python" }, { value: "php", label: "PHP" + (!phpEntry || !phpEntry.readiness.can_start ? " · unavailable" : "") }], d.language);
+        options("project_id", C.projectChoices().map((p) => ({ value: p.project_id,
           label: p.project_id + " · " + p.relative_path + (p.available ? "" : " · " + (p.reason || "unavailable")), disabled: !p.available })), d.project_id);
-        options("source_version", C.sources(current && current.operation).map((v) => ({ value: v, label: "Python " + v })), d.source_version);
-        options("target_version", C.pairs(current && current.operation).filter(([s]) => s === d.source_version).map(([, v]) => ({ value: v, label: "Python " + v })), d.target_version);
-        options("verification_level", ["syntax", "tests", "behavior"].map((v) => ({ value: v, label: { syntax: "Syntax only (no behavior claim)", tests: "Existing tests", behavior: "Tests + recorded behavior" }[v] })), d.verification_level);
+        options("source_version", C.sources(current && current.operation).map((v) => ({ value: v, label: language + " " + v })), d.source_version);
+        options("target_version", C.pairs(current && current.operation).filter(([s]) => s === d.source_version).map(([, v]) => ({ value: v, label: language + " " + v })), d.target_version);
+        options("verification_level", C.levels().map((v) => ({ value: v, label: { syntax: "Syntax only (no behavior claim)", tests: "Existing tests", behavior: "Tests + recorded behavior" }[v] })), d.verification_level);
         for (const type of ["cases", "fixture"]) options(type + "_profile_id", C.profiles(type, d.project_id).map((p) => ({ value: p.id, label: p.id })), d[type + "_profile_id"]);
+        options("security_fix_profile_id", [{ value: "", label: "None · migration only" }, ...C.profiles("security_fix", d.project_id).map((p) => ({ value: p.id, label: p.id + " · offline fixture" }))], d.security_fix_profile_id);
         iterations.value = String(d.max_iterations);
       }
       wrappers.source_version.hidden = !!simulation;
@@ -106,6 +118,9 @@
       wrappers.fixture_profile_id.hidden = !migration;
       wrappers.cases_profile_id.hidden = !migration && !(compatibility && d.verification_level === "behavior");
       wrappers.max_iterations.hidden = !migration;
+      wrappers.security_fix_profile_id.hidden = !php || !migration || !C.profiles("security_fix", d.project_id).length;
+      wrappers.source_version.querySelector(".field-label").textContent = "Source " + language + (php && current && current.operation === "audit" ? " (operator label · static audit)" : " (verified runtime)");
+      wrappers.target_version.querySelector(".field-label").textContent = "Target " + language + " (verified runtime)";
       for (const el of Object.values(fields)) el.disabled = c.loading || state.starting || c.resolving;
       path.disabled = state.starting || c.resolving || c.loading;
       resolve.disabled = path.disabled;
@@ -113,17 +128,18 @@
       resolveStatus.replaceChildren(c.resolveError ? errorNode(c.resolveError) : document.createComment(""));
       const pf = c.preflight;
       readiness.replaceChildren(
+        h("div", { class: "ready-row" }, "Language", badge(language, "info")),
         h("div", { class: "ready-row" }, "Docker", badge(c.capabilities.docker.available ? "Available" : "Unavailable", c.capabilities.docker.available ? "ok" : "err")),
         h("div", { class: "ready-row" }, "Meta AI", badge("Disabled · " + (c.capabilities.live.reason || "not authorized"), "muted")),
         h("div", { class: "ready-row" }, "Preflight", badge(c.checking ? "Checking…" : pf ? pf.result.can_start ? "Ready for this configuration" : "Blocked" : "Not checked", pf ? pf.result.can_start ? "ok" : "err" : "muted")),
-        h("p", { class: "field-hint" }, "A successful preflight does not reserve the worker slot. Bandit warnings are potential risks; a clean scan does not prove security."));
-      errors.replaceChildren(...(pf && pf.result.errors || []).map(errorNode), ...(state.startError ? [errorNode(state.startError)] : []));
+        h("p", { class: "field-hint" }, "A successful preflight does not reserve the worker slot. " + (php ? "PHP lexical warnings" : "Bandit warnings") + " are potential risks; a clean scan does not prove security."));
+      errors.replaceChildren(...(languageReason ? [h("div", { class: "callout callout--warn" }, languageReason)] : []), ...(pf && pf.result.errors || []).map(errorNode), ...(state.startError ? [errorNode(state.startError)] : []));
       const active = state.run && state.run.origin !== "replay" && !state.run.backendFinalized && !state.run.lost;
-      preflight.disabled = c.loading || c.checking || c.resolving || state.starting;
+      preflight.disabled = c.loading || c.checking || c.resolving || state.starting || !!languageReason || !current;
       preflight.textContent = c.checking ? "Checking readiness…" : "Check readiness";
       start.disabled = !C.canStart() || state.starting || !!active;
       start.replaceChildren(state.starting ? h("span", { class: "spinner" }) : icon("play"), state.starting ? "Starting…" : active ? "Run in progress" : "Start run");
-      pending.replaceChildren(...(c.pending ? [h("p", { class: "field-hint" }, c.pending.stale
+      pending.replaceChildren(...(c.pending ? [h("p", { class: "field-hint" }, "Original submission: " + PP.labels.languageName(c.pending.body.language) + " · " + c.pending.body.operation + " · " + c.pending.body.project_id), h("p", { class: "field-hint" }, c.pending.stale
         ? "Backend instance changed. The old request will not be repeated. Review any saved run before starting another."
         : "Submission outcome is uncertain. Retry uses the original configuration and key, even if the form has changed."), retry, discard] : []));
       retry.disabled = !c.pending || c.pending.stale || state.starting || c.loading;

@@ -59,7 +59,7 @@ function harness(handler, saved = {}) {
     createComment: (s) => new Text(s), getElementById: (id) => document.querySelector("#" + id), readyState: "loading" });
   const window = { PP: {}, crypto: webcrypto, confirm: () => true, addEventListener() {} };
   const context = vm.createContext({ window, document, Node: Element, crypto: webcrypto, TextEncoder, AbortController,
-    setTimeout, clearTimeout, queueMicrotask, console, Intl, Date, URL, location: { origin: "http://127.0.0.1:8000", hash: "#/migration" },
+    setTimeout, clearTimeout, queueMicrotask, requestAnimationFrame: (callback) => callback(), console, Intl, Date, URL, location: { origin: "http://127.0.0.1:8000", hash: "#/migration" },
     localStorage: { getItem: (k) => storage.get(k) || null, setItem: (k, v) => storage.set(k, v), removeItem: (k) => storage.delete(k) },
     fetch: async (url, options) => {
       if (!url.startsWith("/api/")) throw new Error("Forbidden external request: " + url);

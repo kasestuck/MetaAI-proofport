@@ -175,7 +175,7 @@
     }
     if (state.control.mode === "v1") {
       list.push(banner("info", "info", "Meta AI disabled.", "Operations use offline checks, explicit fixtures or simulation. No paid model calls or AI Security Fix are enabled."));
-      if (!state.control.capabilities.docker.available) list.push(banner("warn", "box", "Docker unavailable.", "Real checks are blocked. Start Docker Desktop and refresh capabilities; simulation may remain available."));
+      if (!state.control.capabilities.docker.available) list.push(banner("warn", "box", "Docker unavailable.", "Container execution is blocked. Ready static operations and simulation may remain available; check the selected language and operation."));
     } else if (health.data && state.control.mode === "legacy") {
       const mode = health.data.llm_mode;
       if (mode === "mock") {

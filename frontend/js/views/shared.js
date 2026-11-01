@@ -90,12 +90,12 @@
       return L.isSimulated(run) ? PP.util.tag("Simulated") : null;
     },
 
-    triCheck(title, value, desc) {
+    triCheck(title, value, desc, unknownLabel) {
       const t = L.tri(value);
       return h("div", { class: `check check--${t.tone}` },
         h("span", { class: "check-icon" }, icon(t.icon)),
         h("div", { class: "check-body" },
-          h("div", { class: "row-between" }, h("span", { class: "check-title" }, title), badge(t.label, t.tone)),
+          h("div", { class: "row-between" }, h("span", { class: "check-title" }, title), badge(unknownLabel && value !== true && value !== false ? unknownLabel : t.label, t.tone)),
           desc ? h("div", { class: "check-desc" }, desc) : null));
     },
 
@@ -107,7 +107,7 @@
       const tone = { passed: "ok", failed: "err", error: "err", skipped: "muted" };
       return h("div", { class: "stack" },
         h("div", { class: "row-between" },
-          h("div", { class: "card-title" }, title, tests.python ? h("span", { class: "dim" }, "  · Python " + PP.util.fmt.pyVersion(tests.python)) : null),
+          h("div", { class: "card-title" }, title, tests.python || tests.php ? h("span", { class: "dim" }, "  · " + L.runtimeLabel(tests)) : null),
           h("div", { class: "row" },
             badge(counts.passed + " passed", "ok"),
             counts.failed ? badge(counts.failed + " failed", "err") : null,

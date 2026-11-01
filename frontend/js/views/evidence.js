@@ -152,6 +152,7 @@
     }
     const blocks = [];
     if (v.legacy_tests) blocks.push(card({}, S.outcomes(v.legacy_tests, "Existing tests on source")));
+    if (v.source_tests) blocks.push(card({}, S.outcomes(v.source_tests, "Existing tests on source")));
     if (v.target_tests) blocks.push(card({}, S.outcomes(v.target_tests, "Existing tests on target")));
     if (v.compatibility && v.compatibility.existing_tests) blocks.push(card({}, S.outcomes(v.compatibility.existing_tests, "Existing tests on target")));
     if (Array.isArray(v.comparisons) && v.comparisons.length) {

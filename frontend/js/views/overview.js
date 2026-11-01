@@ -36,6 +36,8 @@
           run.restored ? PP.util.tag("Restored", "muted") : null),
         running ? indeterminate("Run in progress") : null,
         PP.util.kv([
+          ["Language", badge(L.languageName(L.language(run)), "info")],
+          ["Selected versions", L.parameters(run).source_version ? L.parameters(run).source_version + (L.parameters(run).target_version ? " → " + L.parameters(run).target_version : " · source label") : undefined],
           ["Phase", st ? L.phaseLabel(st.phase) : null],
           ["Final report", run.reportStatus],
           ["Browser evidence check", run.chain ? run.chain.status : "Not checked"],
@@ -78,7 +80,7 @@
       h("div", { class: "kpi-foot" }, L.isSimulated(run)
         ? "Simulated counts — no tests were executed"
         : total
-          ? fmt.pct(passed, total) + "% of recorded golden cases + existing tests"
+          ? fmt.pct(passed, total) + (L.language(run) === "php" ? "% of recorded golden cases · existing tests listed separately" : "% of recorded golden cases + existing tests")
           : "No checks recorded (not run is not passed)"));
   }
 

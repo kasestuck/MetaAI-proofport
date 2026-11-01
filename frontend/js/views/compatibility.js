@@ -29,11 +29,14 @@
             failed ? "Run failed — no compatibility verdict" : level.label),
           c.level ? h("code", { class: "dim" }, c.level) : null),
         PP.util.kv([
+          ["Language", badge(v.language === "php" ? "PHP" : "Python", "info")],
           ["Operation", v.mode ? badge(v.mode, "info") : null],
           ["Source version", v.source_version || h("span", { class: "dim" }, "not determined")],
           ["Analysis interpreter", v.analysis_interpreter || undefined],
           ["Target version", v.target_version || (v.mode === "compatibility" ? null : h("span", { class: "dim" }, "not applicable"))],
           ["Actual target patch", c.existing_tests && c.existing_tests.python ? "Python " + fmt.pyVersion(c.existing_tests.python) : c.syntax && c.syntax.python ? "Python " + fmt.pyVersion(c.syntax.python) : undefined],
+          ["Actual source PHP", v.language === "php" ? (v.source_tests && v.source_tests.php || v.source_syntax && v.source_syntax.php) : undefined],
+          ["Actual target PHP", v.language === "php" && v.target_tests ? v.target_tests.php : undefined],
           ["Code translated", v.migration_performed === false ? "No — compatibility checks do not migrate code" : undefined],
           ["Project executed", v.project_executed !== undefined ? String(!!v.project_executed) : undefined],
         ]),
@@ -42,6 +45,10 @@
 
   function checksCard(v) {
     const c = v.compatibility || {};
+    if (v.language === "php") return card({ title: "PHP checks", sub: "Separate results; null or missing means not verified" },
+      S.triCheck("Syntax verified", c.syntax_passed, "PHP lint ran in the selected target Docker interpreter. Syntax alone does not prove compatibility.", "Not verified"),
+      S.triCheck("Tests passed", c.tests_passed, "A nonempty supported local PHP test suite passed on the target. No dependencies are installed automatically.", "Not verified"),
+      S.triCheck("Behavior verified", c.behavior_verified, "Recorded function inputs matched on source and target. This is finite coverage, not universal equivalence.", "Not verified"));
     const coverage = c.covered_modules || c.uncovered_modules
       ? `Covered modules: ${(c.covered_modules || []).length}; uncovered: ${(c.uncovered_modules || []).length}.`
       : null;
@@ -55,7 +62,7 @@
 
   function coverageCard(v) {
     const c = v.compatibility || {};
-    const comps = Array.isArray(c.comparisons) ? c.comparisons : [];
+    const comps = Array.isArray(c.comparisons) ? c.comparisons : Array.isArray(v.comparisons) ? v.comparisons : [];
     if (!c.covered_modules && !comps.length) return null;
     const matched = comps.filter((x) => x.matches).length;
     return card({ title: "Golden coverage", sub: "Recorded behavior compared between source and target interpreters" },
@@ -87,11 +94,11 @@
         S.limitations(d.limitations)));
   }
 
-  function registryCard(v, current) {
+  function registryCard(v, current, language) {
     const reg = Array.isArray(v.registry) ? v.registry : null;
     if (!reg) return null;
     const yes = (x) => x === true ? badge("yes", "ok") : x === false ? badge("no", "muted") : badge("unknown", "muted");
-    return card({ title: "Python runtime registry", flush: true, sub: (current ? "Latest capabilities snapshot" : "Snapshot recorded in this report") + " — configured ≠ available ≠ verified" },
+    return card({ title: (language === "php" ? "PHP" : "Python") + " runtime registry", flush: true, sub: (current ? "Latest capabilities snapshot" : "Snapshot recorded in this report") + " — configured ≠ available ≠ verified" },
       h("div", { class: "table-wrap" }, h("table", { class: "table" },
         h("thead", null, h("tr", null, ["Version", "Image", "Configured", "Available", "Verified", "Roles"].map((t) => h("th", null, t)))),
         h("tbody", null, reg.map((r) => h("tr", null,
@@ -119,8 +126,11 @@
   }
 
   function referenceCard() {
+    const run = PP.store.state.run;
+    const language = run ? L.language(run) : PP.control.state.draft.language || "python";
+    const caps = PP.store.state.control.capabilities;
     if (PP.store.state.control.mode === "v1") return card({ title: "Current runtime capabilities", sub: "Available images and verified support are separate checks" },
-      h("div", { class: "stack" }, registryCard({ registry: PP.store.state.control.capabilities.runtimes }, true),
+      h("div", { class: "stack" }, registryCard({ registry: language === "php" ? caps.languages && caps.languages.php && caps.languages.php.runtimes || [] : caps.runtimes }, true, language),
         h("a", { class: "btn", href: "#/migration" }, "Configure a compatibility check")));
     if (PP.store.state.control.mode !== "legacy") return card({ title: "Runtime capabilities unavailable" },
       h("p", { class: "muted" }, "Wait for discovery or refresh capabilities in Run control. No runtime support is inferred from an unavailable response."),
@@ -140,7 +150,7 @@
     const run = state.run;
     const control = run && run.control;
     const partial = control && control.result.compatibility ? Object.assign({}, control.parameters, {
-      mode: control.parameters.operation, compatibility: control.result.compatibility, limitations: control.result.limitations,
+      mode: control.parameters.operation, compatibility: control.result.compatibility, limitations: control.result.limitations, target_tests: control.result.target_tests,
     }) : null;
     const v = run && run.report ? run.report.verification || {} : partial;
     const blocks = [];
@@ -153,7 +163,8 @@
     } else if (v.compatibility) {
       blocks.push(h("div", { class: "grid grid-2" }, levelHero(run, v), checksCard(v)));
       const cov = coverageCard(v);
-      const tests = v.compatibility.existing_tests ? card({}, S.outcomes(v.compatibility.existing_tests, "Existing tests on target")) : null;
+      const existing = v.compatibility.existing_tests || v.target_tests;
+      const tests = existing ? card({}, S.outcomes(existing, "Existing tests on target")) : null;
       if (cov || tests) blocks.push(h("div", { class: "grid grid-2" }, cov || h("div"), tests || h("div")));
       const det = detectionCard(v);
       if (det) blocks.push(det);
@@ -174,7 +185,7 @@
 
   PP.views.compatibility = {
     title: "Compatibility",
-    sub: "Python versions, syntax, tests and recorded-behavior checks",
+    sub: "Python and PHP versions, syntax, tests and recorded-behavior checks",
     mount(el) { root = el; },
     update: render,
   };

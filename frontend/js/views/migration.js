@@ -79,18 +79,18 @@
     },
     unsupported_migration_pair: {
       title: "Unsupported migration pair",
-      what: "Migration supports only Python 2.7 → 3.12.",
-      fix: ["Use the compatibility pipeline to check other versions."],
+      what: "This pair is not supported for the selected language and operation.",
+      fix: ["Select versions offered by backend capabilities, then check readiness again."],
     },
     runtime_unavailable: {
-      title: "Required Python image is missing",
-      what: "The Docker image for the selected Python version is not installed. Images are never pulled automatically.",
+      title: "Required runtime image is missing",
+      what: "The Docker image for the selected language/version is not installed. Images are never pulled automatically.",
       fix: ["An operator must install the image and restart."],
     },
     unverified_version: {
-      title: "Python runtime not verified",
+      title: "Runtime not verified",
       what: "The image exists but has not passed the backend's runtime self-tests.",
-      fix: ["Run with PROOFPORT_VERIFY_RUNTIME=1 once (see backend/UNIVERSAL.md)."],
+      fix: ["Ask the operator to follow the selected language's explicit verification guide, then refresh capabilities."],
     },
     source_version_ambiguous: {
       title: "Source Python version is ambiguous",
@@ -114,6 +114,21 @@
     { id: "security", label: "Security", phase: "security", events: ["security_finding", "security_fix", "fix_reverted"], desc: "Scanner warnings and fix decisions" },
     { id: "report", label: "Report", phase: "reporting", events: ["run_finished"], desc: "Hashes rechecked, report written" },
   ];
+
+  function stepsFor(run) {
+    if (L.language(run) !== "php") return STEPS;
+    const p = L.parameters(run);
+    const operation = p.operation || (p.mode || "").replace(/^php_/, "");
+    return STEPS.filter((s) => operation === "audit" ? ["analyze", "security", "report"].includes(s.id)
+      : operation === "compatibility" ? s.id !== "migrate" && s.id !== "security" && (s.id !== "record" || p.verification_level === "behavior") : true)
+      .map((s) => Object.assign({}, s, {
+        label: { analyze: "PHP files", record: "Golden cases", migrate: "Fixture migration", verify: "Verification", security: "Security findings", report: "Evidence" }[s.id],
+        desc: { analyze: "PHP inventory, hashes and analysis", record: "Actual results on source PHP", migrate: "Authored patches · not Meta AI",
+          verify: "Syntax, tests and selected behavior checks", security: "Limited PHP rules and patch decisions", report: "Report and evidence chain" }[s.id],
+        phase: s.id === "verify" ? "testing" : s.phase,
+        events: s.events.concat(s.id === "analyze" ? ["language_analysis"] : s.id === "security" ? ["security_scan"] : []),
+      }));
+  }
 
   /** Server pipeline as far as it is known: final report > operator declaration > unknown. */
   function knownPipeline(run) {
@@ -317,10 +332,11 @@
   // ---------- Pipeline ----------
 
   function stepStates(run) {
+    const steps = stepsFor(run);
     const st = run.state;
     const terminal = st && PP.store.TERMINAL.has(st.status);
     const counts = {};
-    for (const s of STEPS) counts[s.id] = run.events.filter((e) => s.events.includes(e.type)).length;
+    for (const s of steps) counts[s.id] = run.events.filter((e) => s.events.includes(e.type)).length;
     const modules = st ? st.modules : [];
     const testing = modules.some((m) => m.status === "testing");
 
@@ -328,15 +344,16 @@
     let current = null;
     if (st && !terminal) {
       if (st.phase === "migrating") current = testing ? "verify" : "migrate";
-      else current = (STEPS.find((s) => s.phase === st.phase) || {}).id || null;
+      else if (st.phase === "fixing") current = "migrate";
+      else current = (steps.find((s) => s.phase === st.phase) || {}).id || null;
     }
     // The step where a failed run stopped.
     let failedAt = null;
     if (terminal && st.status === "failed") {
       failedAt = st.phase === "migrating" ? (testing || counts.verify ? "verify" : "migrate")
-        : (STEPS.find((s) => s.phase === st.phase && s.id !== "report") || {}).id || null;
+        : (steps.find((s) => s.phase === st.phase && s.id !== "report") || {}).id || null;
     }
-    return STEPS.map((s) => {
+    return steps.map((s) => {
       const reached = counts[s.id] > 0 || (s.phase && run.phasesSeen.includes(s.phase));
       let state = "pending";
       let text = "Waiting";
@@ -363,7 +380,8 @@
     return card({ title: "Pipeline", sub: "Steps light up only from the backend's reported phase and recorded evidence events — no estimated progress.",
       actions: st ? [S.statusBadge(st.status, true), S.provenanceBadge(run)] : null },
     h("div", { class: "stack" },
-      h("div", { class: "stepper stepper--flow", style: { "--steps": String(STEPS.length) } }, items),
+      h("div", { class: "row" }, badge(L.languageName(L.language(run)), "info"), L.parameters(run).source_version ? badge(L.parameters(run).source_version + (L.parameters(run).target_version ? " → " + L.parameters(run).target_version : " · source label"), "outline") : null),
+      h("div", { class: "stepper stepper--flow", style: { "--steps": String(items.length) } }, items),
       st && !terminal ? h("div", { class: "row muted", style: { fontSize: "12.5px" } },
         h("span", { class: "spinner" }), "Backend phase: ", h("code", null, String(st.phase || "—")), h("span", { class: "dim" }, `· ${fmt.seconds(st.metrics.seconds)} elapsed`)) : null,
       st && !terminal ? indeterminate("Run in progress") : null,
@@ -380,7 +398,7 @@
         }))) : null,
       h("p", { class: "dim", style: { fontSize: "12px" } }, run.origin === "replay"
         ? "Replay: steps are inferred from the final phase and recorded events."
-        : "Short phases can finish between polls; they are still marked from their evidence events. “Verify” has no backend phase and is shown only from test events.")));
+        : "Short phases can finish between polls; activity is marked from actual phases and evidence events. It does not by itself prove a passed check or a verified evidence chain.")));
   }
 
   // ---------- Modules ----------
@@ -392,9 +410,11 @@
     const counts = {};
     for (const m of modules) counts[m.status] = (counts[m.status] || 0) + 1;
     const simulated = L.isSimulated(run);
+    const phpAudit = L.language(run) === "php" && (L.parameters(run).operation === "audit" || L.parameters(run).mode === "php_audit");
+    const moduleStatus = (status) => phpAudit && status === "green" ? { label: "Audited", tone: "info" } : L.moduleStatus(status);
 
     const rows = modules.map((m) => {
-      const s = L.moduleStatus(m.status);
+      const s = moduleStatus(m.status);
       const before = prevModuleStatus.get(m.name);
       const turnedGreen = before && before !== "green" && m.status === "green";
       prevModuleStatus.set(m.name, m.status);
@@ -411,8 +431,8 @@
     });
 
     return card({ title: "Modules", titleExtra: simulated ? PP.util.tag("Simulated") : null, flush: true,
-      sub: "Per-module golden cases (tests_passed / tests_total). Green follows the worker's rules — read provenance before concluding.",
-      actions: h("div", { class: "row" }, Object.keys(counts).map((k) => badge(counts[k] + " " + L.moduleStatus(k).label.toLowerCase(), L.moduleStatus(k).tone))) },
+      sub: phpAudit ? "Audit completed does not mean syntax, tests, behavior or security were verified." : "Per-module golden cases (tests_passed / tests_total). Green follows the worker's rules — read provenance before concluding.",
+      actions: h("div", { class: "row" }, Object.keys(counts).map((k) => badge(counts[k] + " " + moduleStatus(k).label.toLowerCase(), moduleStatus(k).tone))) },
     modules.length
       ? h("div", { class: "table-wrap" }, h("table", { class: "table" },
         h("thead", null, h("tr", null, h("th", null, "Module"), h("th", null, "Status"), h("th", { class: "col-num" }, "Iterations"), h("th", null, "Golden cases"))),
@@ -430,6 +450,7 @@
     const casesTotal = modules.reduce((n, m) => n + m.tests_total, 0);
     const m = st ? st.metrics : null;
     const failed = st && st.status === "failed";
+    const php = L.language(run) === "php";
 
     const line = (label, passed, total, note, key) => h("div", { class: "stack", style: { gap: "6px" } },
       h("div", { class: "row-between" }, h("span", null, label), h("span", { class: "num" }, total ? `${fmt.int(passed)} / ${fmt.int(total)}` : "—")),
@@ -439,12 +460,14 @@
     return card({ title: "Verification progress", titleExtra: S.simTag(run), sub: "Counts can reset during repair loops; denominators may change." },
       h("div", { class: "stack" },
         line("Golden cases (sum over modules)", casesPassed, casesTotal, "Recorded inputs replayed on the target and compared with the original output.", "cases-" + run.id),
-        m ? line("All checks (metrics)", m.tests_passed, m.tests_total, "Golden comparisons + existing tests where those stages ran. Not added to the line above.", "checks-" + run.id) : null,
+        m ? line(php ? "Golden comparisons (metrics)" : "All checks (metrics)", m.tests_passed, m.tests_total, php ? "Existing PHP tests are reported separately below; these counts cover golden comparisons only." : "Golden comparisons + existing tests where those stages ran. Not added to the line above.", "checks-" + run.id) : null,
         v ? PP.util.kv([
           ["Golden cases recorded", v.golden_case_count !== undefined ? fmt.int(v.golden_case_count) : undefined],
           ["Legacy tests (source)", v.legacy_tests ? `${fmt.int(v.legacy_tests.tests_run)} ran on Python ${fmt.pyVersion(v.legacy_tests.python)}` : undefined],
+          ["Source tests", v.source_tests ? `${fmt.int(v.source_tests.tests_run)} ran on ${L.runtimeLabel(v.source_tests)}` : undefined],
+          ["Target syntax", v.syntax_passed !== undefined ? badge(L.tri(v.syntax_passed).label, L.tri(v.syntax_passed).tone) : undefined],
           ["Target compiles", v.target_compiles !== undefined ? badge(L.tri(v.target_compiles).label, L.tri(v.target_compiles).tone) : undefined],
-          ["Target tests", v.target_tests ? `${fmt.int(v.target_tests.tests_run)} ran on Python ${fmt.pyVersion(v.target_tests.python)}` : undefined],
+          ["Target tests", v.target_tests ? `${fmt.int(v.target_tests.tests_run)} ran on ${L.runtimeLabel(v.target_tests)}` : undefined],
           ["Lines migrated", m && (m.lines_migrated || v.mode === "fixtures" || v.mode === "live") ? fmt.int(m.lines_migrated) + " (accepted green modules)" : undefined],
           ["AI migration", v.ai_migration !== undefined ? (v.ai_migration ? badge("Yes · verified", "ok") : badge("No", "muted")) : undefined],
         ]) : S.reportPending(run, "Golden case counts, legacy/target test runs and comparisons arrive with the final report")));
@@ -468,7 +491,12 @@
         h("div", { class: "card-title" }, `Behavior mismatches (${mismatches.length})`),
         mismatches.slice(0, 50).map((c) => h("details", { class: "disclosure" },
           h("summary", null, h("code", null, c.id), h("span", { class: "dim" }, c.module)),
-          h("div", { class: "disclosure-body grid grid-2" },
+          L.language(run) === "php" ? h("div", { class: "disclosure-body" }, PP.util.kv([
+            ["Mismatch reason", c.reason || "Recorded PHP outcomes differ"],
+            ["Source outcome SHA-256", c.expected_sha256 || "Not reported"],
+            ["Target outcome SHA-256", c.observed_sha256 || "Not reported"],
+            ["Raw outcomes", "Not included in the API comparison; inspect the retained local recordings."],
+          ])) : h("div", { class: "disclosure-body grid grid-2" },
             h("div", null, h("div", { class: "section-label" }, "Expected (source)"), h("pre", { class: "code code--wrap" }, JSON.stringify(c.expected, null, 2))),
             h("div", null, h("div", { class: "section-label" }, "Actual (target)"), h("pre", { class: "code code--wrap" }, JSON.stringify(c.actual, null, 2))))))));
     }

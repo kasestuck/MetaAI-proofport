@@ -27,6 +27,22 @@
         if (!Array.isArray(entry.pairs) || !entry.pairs.every((p) => strings(p) && p.length === 2)) failShape();
       } else if (op === "audit" && !strings(entry.source_versions)) failShape();
     }
+    if (data.languages !== undefined && !object(data.languages)) failShape();
+    const php = data.languages && data.languages.php;
+    if (php !== undefined) {
+      if (!object(php) || ![php.configured, php.available, php.verified].every((v) => typeof v === "boolean") || !strings(php.supported_operations) || !object(php.readiness)
+        || typeof php.readiness.can_start !== "boolean" || !Array.isArray(php.runtimes)
+        || !php.runtimes.every((r) => object(r) && typeof r.version === "string")) failShape();
+      if (php.operations !== undefined) {
+        if (!object(php.operations)) failShape();
+        for (const [op, entry] of Object.entries(php.operations)) {
+          if (!object(entry) || !strings(entry.execution_modes)) failShape();
+          if (["migration", "compatibility"].includes(op) && (!Array.isArray(entry.pairs) || !entry.pairs.every((p) => strings(p) && p.length === 2))) failShape();
+          if (op === "audit" && !strings(entry.source_versions)) failShape();
+          if (entry.verification_levels !== undefined && !strings(entry.verification_levels)) failShape();
+        }
+      }
+    }
     return data;
   }
   function validateProjects(data) {
@@ -34,6 +50,8 @@
       || !data.projects.every((p) => object(p) && typeof p.project_id === "string" && typeof p.relative_path === "string" && typeof p.available === "boolean")
       || ![data.cases_profiles, data.fixture_profiles].every((a) => Array.isArray(a) && a.every((p) => object(p)
         && typeof p.id === "string" && typeof p.project_id === "string" && typeof p.available === "boolean"))) failShape();
+    if (data.security_fix_profiles !== undefined && (!Array.isArray(data.security_fix_profiles) || !data.security_fix_profiles.every((p) => object(p)
+      && typeof p.id === "string" && typeof p.project_id === "string" && typeof p.available === "boolean"))) failShape();
     return data;
   }
   function invalidate() {
@@ -43,33 +61,70 @@
     c.checking = false;
     store.state.startError = null;
   }
+  const language = () => c.draft.language || "python";
+  function languageCaps() {
+    if (!c.capabilities) return null;
+    return language() === "php" ? c.capabilities.languages && c.capabilities.languages.php : c.capabilities;
+  }
+  function languageReason() {
+    if (language() !== "php") return null;
+    const caps = languageCaps();
+    if (!caps) return "PHP is not configured on this backend.";
+    if (!caps.configured || !caps.available || !caps.verified || !caps.readiness.can_start || !caps.supported_operations.length) {
+      const reason = caps.readiness.reason || "No verified operations";
+      return "PHP unavailable: " + (PP.labels.errorHint(reason) || reason);
+    }
+    return null;
+  }
+  function projectChoices() {
+    return (c.projects && c.projects.projects || []).filter((p) => (p.language || "python") === language());
+  }
   function runtime(version, role) {
-    return c.capabilities && c.capabilities.runtimes.some((r) => r.version === version && r[role] === true
+    const caps = languageCaps();
+    return caps && caps.runtimes.some((r) => r.version === version && r[role] === true
       && r.configured === true && r.available === true && r.verified === true);
   }
   function pairs(operation) {
-    const entry = c.capabilities && c.capabilities.operations[operation];
+    const caps = languageCaps();
+    const entry = caps && caps.operations && caps.operations[operation];
     return (entry && entry.pairs || []).filter(([source, target]) => runtime(source, "source") && runtime(target, "target"));
   }
   function sources(operation) {
-    const entry = c.capabilities && c.capabilities.operations[operation];
+    const caps = languageCaps();
+    const entry = caps && caps.operations && caps.operations[operation];
+    if (language() === "php" && operation === "audit" && entry && entry.static_only === true) {
+      // An operator label for static rules, not a claim of interpreter execution.
+      return caps.supported_operations.includes("audit") ? entry.source_versions.filter((v) => caps.runtimes.some((r) => r.version === v && r.configured === true && r.source === true)) : [];
+    }
     return operation === "audit" ? (entry && entry.source_versions || []).filter((v) => runtime(v, "source"))
       : [...new Set(pairs(operation).map((p) => p[0]))];
   }
   function profiles(type, projectId) {
-    return (c.projects && c.projects[type + "_profiles"] || []).filter((p) => p.project_id === projectId && p.available === true);
+    const project = projectChoices().find((p) => p.project_id === projectId);
+    if (!project) return [];
+    const allowed = project.available_profiles && project.available_profiles[type];
+    return (c.projects && c.projects[type + "_profiles"] || []).filter((p) => p.project_id === projectId && p.available === true
+      && (!Array.isArray(allowed) || allowed.includes(p.id)));
+  }
+  function levels() {
+    const caps = languageCaps();
+    const policy = caps && caps.operations && caps.operations.compatibility;
+    return (policy && policy.verification_levels || (language() === "python" ? ["syntax", "tests", "behavior"] : [])).filter((v) => ["syntax", "tests", "behavior"].includes(v));
   }
   function choices() {
     const result = [];
-    const caps = c.capabilities;
-    if (!caps) return result;
-    for (const [operation, entry] of Object.entries(caps.operations)) {
+    const caps = languageCaps();
+    if (!caps || languageReason()) return result;
+    for (const [operation, entry] of Object.entries(caps.operations || {})) {
       if (!["migration", "audit", "compatibility"].includes(operation)) continue;
+      if (language() === "php" && !caps.supported_operations.includes(operation)) continue;
       for (const mode of entry.execution_modes) {
         if (!(operation === "migration" && ["simulation", "offline_fixtures"].includes(mode)) && !(operation !== "migration" && mode === "offline")) continue;
-        const reason = mode === "simulation" ? null : !caps.docker.available ? "Docker unavailable"
+        if (language() === "php" && mode === "simulation") continue;
+        const staticAudit = language() === "php" && operation === "audit" && entry.static_only === true;
+        const reason = staticAudit ? sources(operation).length ? null : "No configured source label" : mode === "simulation" ? null : !c.capabilities.docker.available ? "Docker unavailable"
           : !sources(operation).length ? "No verified runtime combination"
-          : ["audit", "migration"].includes(operation) && caps.scanner.available !== true ? "Bandit scanner unavailable" : null;
+          : language() === "python" && ["audit", "migration"].includes(operation) && c.capabilities.scanner.available !== true ? "Bandit scanner unavailable" : null;
         result.push({ id: operation + ":" + mode, operation, mode, reason,
           label: mode === "simulation" ? "Simulation" : { migration: "Migration", audit: "Security Audit", compatibility: "Compatibility Check" }[operation] });
       }
@@ -78,10 +133,11 @@
   }
   function normalize() {
     const d = c.draft;
+    if (!["python", "php"].includes(d.language)) d.language = "python";
     const options = choices();
     if (!options.some((o) => o.id === d.choice)) d.choice = (options.find((o) => !o.reason) || options[0] || {}).id || "";
     const choice = options.find((o) => o.id === d.choice);
-    const projects = c.projects && c.projects.projects || [];
+    const projects = projectChoices();
     if (!projects.some((p) => p.project_id === d.project_id && p.available)) d.project_id = (projects.find((p) => p.available) || {}).project_id || "";
     if (choice && choice.mode !== "simulation") {
       const versions = sources(choice.operation);
@@ -93,7 +149,8 @@
       const entries = profiles(type, d.project_id);
       if (!entries.some((p) => p.id === d[type + "_profile_id"])) d[type + "_profile_id"] = (entries[0] || {}).id || "";
     }
-    if (!["syntax", "tests", "behavior"].includes(d.verification_level)) d.verification_level = "tests";
+    if (!profiles("security_fix", d.project_id).some((p) => p.id === d.security_fix_profile_id)) d.security_fix_profile_id = "";
+    if (!levels().includes(d.verification_level)) d.verification_level = levels().includes("tests") ? "tests" : levels()[0] || "";
     if (d.max_iterations === undefined) d.max_iterations = 5;
   }
   function edit(values) {
@@ -106,13 +163,14 @@
     const d = c.draft;
     const choice = choices().find((o) => o.id === d.choice);
     if (!choice || choice.reason) throw problem("operation_unavailable", choice && choice.reason || "No operation available.", "operation");
-    if (!(c.projects.projects || []).some((p) => p.project_id === d.project_id && p.available)) throw problem("project_not_found", "Select an available registered project.", "project_id");
+    if (!projectChoices().some((p) => p.project_id === d.project_id && p.available)) throw problem("project_not_found", "Select an available registered project for this language.", "project_id");
     const body = { operation: choice.operation, project_id: d.project_id, execution_mode: choice.mode };
+    if (language() === "php") body.language = "php";
     if (choice.mode === "simulation") return body;
     body.source_version = d.source_version;
     if (!sources(choice.operation).includes(d.source_version)) throw problem("unverified_version", "Select a verified source runtime.", "source_version");
     if (choice.operation !== "audit") {
-      if (!pairs(choice.operation).some(([s, t]) => s === d.source_version && t === d.target_version)) throw problem("unsupported_python_pair", "Select an allowed verified version pair.", "target_version");
+      if (!pairs(choice.operation).some(([s, t]) => s === d.source_version && t === d.target_version)) throw problem("unsupported_version_pair", "Select an allowed verified version pair.", "target_version");
       body.target_version = d.target_version;
     }
     if (choice.operation === "migration") {
@@ -120,11 +178,13 @@
       if (!Number.isInteger(body.max_iterations) || body.max_iterations < 1 || body.max_iterations > 5) throw problem("invalid_request", "Iterations must be an integer from 1 to 5.", "max_iterations");
       body.fixture_profile_id = d.fixture_profile_id;
       body.cases_profile_id = d.cases_profile_id;
+      if (language() === "php" && d.security_fix_profile_id) body.security_fix_profile_id = d.security_fix_profile_id;
     } else if (choice.operation === "compatibility") {
+      if (!levels().includes(d.verification_level)) throw problem("incompatible_parameters", "Select a verification level offered by the backend.", "verification_level");
       body.verification_level = d.verification_level;
       if (d.verification_level === "behavior") body.cases_profile_id = d.cases_profile_id;
     }
-    for (const type of ["cases", "fixture"]) {
+    for (const type of ["cases", "fixture", "security_fix"]) {
       const field = type + "_profile_id";
       if (field in body && !profiles(type, d.project_id).some((p) => p.id === body[field])) throw problem("profile_unavailable", "No available project-bound " + type + " profile. Choose another project or verification level explicitly.", field);
     }
@@ -189,14 +249,18 @@
     c.resolving = true; c.resolveError = null;
     invalidate(); store.emit();
     const instance = c.capabilities && c.capabilities.instance_id;
+    const revision = c.revision;
     try {
       // Server remains authoritative, including junction/link and secret policy.
       if (!relativePath || /(^[\\/]|:|(^|[\\/])\.\.([\\/]|$))/.test(relativePath)) throw problem("unsafe_project_path", "Use a workspace-relative path without traversal or a drive prefix.", "relative_path");
       const result = await api.resolveProject(relativePath);
+      const catalog = validateProjects(await api.projects());
       if (token !== resolveToken || !c.capabilities || instance !== c.capabilities.instance_id) return;
+      if (revision !== c.revision) return;
       if (!object(result) || typeof result.project_id !== "string" || typeof result.relative_path !== "string" || !["file", "directory"].includes(result.kind)) failShape();
-      c.projects.projects = c.projects.projects.filter((p) => p.project_id !== result.project_id).concat(Object.assign({}, result, { available: true }));
-      edit({ project_id: result.project_id });
+      c.projects = catalog;
+      if (!catalog.projects.some((p) => p.project_id === result.project_id)) catalog.projects.push(Object.assign({}, result, { available: true }));
+      edit({ project_id: result.project_id, language: ["python", "php"].includes(result.language) ? result.language : language() });
     } catch (err) { if (token === resolveToken) c.resolveError = err; }
     finally { if (token === resolveToken) { c.resolving = false; store.emit(); } }
   }
@@ -238,7 +302,7 @@
       const response = await api.createRun(pending.body, pending.key);
       if (!object(response) || typeof response.run_id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(response.run_id)) failShape();
       store.attach(response.run_id, { source: pending.body.project_id, maxIterations: pending.body.max_iterations,
-        apiMode: "v1", instanceId: pending.instanceId });
+        apiMode: "v1", instanceId: pending.instanceId, language: pending.body.language || "python" });
       c.pending = null; savePending(); invalidate();
     } catch (err) {
       store.state.startError = err;
@@ -253,15 +317,16 @@
   function init() {
     try {
       const p = JSON.parse(localStorage.getItem(pendingStorage) || "null");
-      const allowed = ["operation", "project_id", "execution_mode", "source_version", "target_version", "max_iterations", "verification_level", "cases_profile_id", "fixture_profile_id"];
+      const allowed = ["operation", "project_id", "execution_mode", "source_version", "target_version", "max_iterations", "verification_level", "cases_profile_id", "fixture_profile_id", "language", "security_fix_profile_id"];
       if (p && typeof p.key === "string" && /^[A-Za-z0-9_-]{8,128}$/.test(p.key) && object(p.body)
         && ["migration", "audit", "compatibility"].includes(p.body.operation)
         && ["offline_fixtures", "offline", "simulation"].includes(p.body.execution_mode)
+        && (p.body.language === undefined || ["python", "php"].includes(p.body.language))
         && typeof p.body.project_id === "string" && typeof p.instanceId === "string"
         && Object.keys(p.body).every((key) => allowed.includes(key))) { p.body = Object.freeze(p.body); c.pending = p; }
     } catch (_) { /* Invalid local storage is ignored. */ }
     return refresh();
   }
   PP.control = { state: c, init, refresh, edit, resolve, preflight, canStart, submit, discardPending,
-    choices, sources, pairs, profiles, payload, observeInstance, validateCapabilities, validateProjects };
+    choices, sources, pairs, profiles, levels, languageReason, projectChoices, languageCaps, payload, observeInstance, validateCapabilities, validateProjects };
 })(window.PP);

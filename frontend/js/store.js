@@ -54,7 +54,7 @@
   // ---------- Persistence of the last known run id (browser memory only) ----------
   function remember(run) {
     try {
-      localStorage.setItem(cfg.storageKey, JSON.stringify({ id: run.id, source: run.source, maxIterations: run.maxIterations, startedAt: run.startedAt, apiMode: run.apiMode, instanceId: run.instanceId }));
+      localStorage.setItem(cfg.storageKey, JSON.stringify({ id: run.id, source: run.source, maxIterations: run.maxIterations, startedAt: run.startedAt, apiMode: run.apiMode, instanceId: run.instanceId, language: run.language }));
     } catch (_) { /* storage may be unavailable; non-critical */ }
   }
   function recall() {
@@ -96,6 +96,7 @@
       key, id: run.id, origin: run.origin, source: run.source, fileName: run.fileName,
       startedAt: run.startedAt, maxIterations: run.maxIterations,
       apiMode: run.apiMode, instanceId: run.instanceId,
+      language: PP.labels.language(run),
       status: run.lost ? "lost" : run.control ? run.control.lifecycle : st ? st.status : "connecting",
       events: run.events.length,
       pipeline: run.control ? run.control.parameters.operation + " · " + run.control.execution.effective : run.report ? (run.report.simulation ? "simulation" : run.report.settings && run.report.settings.pipeline) : null,
@@ -160,6 +161,7 @@
       apiMode: meta && meta.apiMode || (state.control && state.control.mode === "v1" ? "v1" : "legacy"),
       instanceId: meta && meta.instanceId || null,
       control: null,
+      language: meta && meta.language || null,
       backendFinalized: false,
       source: meta && meta.source || null,
       maxIterations: meta && meta.maxIterations || null,
@@ -246,6 +248,7 @@
     }
     run.instanceId = details.instance_id;
     run.control = details;
+    run.language = details.parameters.language || "python";
     run.backendFinalized = details.finalized;
     remember(run);
     return details.state;
