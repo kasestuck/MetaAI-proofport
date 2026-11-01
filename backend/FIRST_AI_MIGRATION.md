@@ -1,5 +1,9 @@
 # P8 — first genuine Python module migration: awaiting paid approval
 
+P8.2 update: [P82_LIVE_RESULT.md](P82_LIVE_RESULT.md) records a separately
+authorized successful live mathutils run: one call, 31/31 cases, 3/3 tests and
+USD 0.00831575 estimated usage. The earlier P8/P8.1 notes below are historical.
+
 Update: the approved P8 run failed (26/31 cases, three tests, two API attempts,
 USD 0.01367425). [P8_FAILURE_ANALYSIS.md](P8_FAILURE_ANALYSIS.md) records P8.1's
 offline diagnosis, detailed opt-in repair observations and response diagnostics.

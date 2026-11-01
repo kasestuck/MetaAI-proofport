@@ -196,6 +196,35 @@ def test_three_full_reservations_fit_approved_budget():
     assert amount*3 == Decimal("0.049344") <= p8.LIMITS.max_cost_usd
 
 
+def test_p82_profile_has_exact_approved_limits_and_budget():
+    from decimal import Decimal
+    limits=p8.profile_limits('p8.2')
+    assert (limits.max_calls,limits.max_input_tokens,limits.max_output_tokens,limits.max_total_tokens,limits.timeout_seconds)==(2,9216,3072,24576,30)
+    assert limits.max_cost_usd==Decimal('0.05')
+    assert 2*(9216*Decimal('1.25')+3072*Decimal('4.25'))/1000000==Decimal('0.049152')
+    assert p8.profile_limits('p8') is p8.LIMITS
+    with pytest.raises(ValueError): p8.profile_limits('unbounded')
+
+
+def test_prepared_budget_cannot_be_switched_to_p82(prepared):
+    workspace,env,runner=prepared
+    with pytest.raises(ValueError,match='immutable budget'):
+        p8.execute(workspace,env,acknowledged=True,runner=runner,profile='p8.2')
+    assert not (workspace/'execution_started.json').exists()
+
+
+def test_p82_profile_stops_after_two_verified_failures(prepared,monkeypatch):
+    workspace,env,runner=prepared
+    manifest,new_workspace=p8.prepare(env,runner=runner,profile='p8.2')
+    assert manifest['max_reserved_cost_usd']=='0.049152'
+    monkeypatch.setattr(p8,'verify_candidate',lambda *a:checks(False))
+    client=model_client(env)
+    client.limits=p8.P82_LIMITS
+    report=p8.execute(new_workspace,env,acknowledged=True,runner=runner,client=client,profile='p8.2')
+    assert report['model_calls']==2 and report['status']=='failed' and report['rollback']
+    assert report['limits']==p8.public_limits(p8.P82_LIMITS) and report['profile']=='p8.2'
+
+
 def test_syntax_failure_skips_behavior_and_suite(monkeypatch):
     actions=[]
     def invoke(runner,image,source,action,**kw):

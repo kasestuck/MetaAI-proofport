@@ -37,6 +37,18 @@ SOURCE = ROOT / "samples/legacy_shop"
 FILE = "legacy_shop/mathutils.py"
 LIMITS = LLMLimits(max_calls=3, max_input_tokens=7936, max_output_tokens=1536,
                    max_total_tokens=28416, max_cost_usd=Decimal("0.05"), timeout_seconds=30)
+P82_LIMITS = LLMLimits(max_calls=2, max_input_tokens=9216, max_output_tokens=3072,
+                       max_total_tokens=24576, max_cost_usd=Decimal("0.05"), timeout_seconds=30)
+
+
+def profile_limits(profile):
+    if profile == "p8": return LIMITS
+    if profile == "p8.2": return P82_LIMITS
+    raise ValueError("Unknown bounded first-module profile")
+
+
+def public_limits(limits):
+    return {**asdict(limits), "max_cost_usd":str(limits.max_cost_usd)}
 
 
 def digest(path):
@@ -90,7 +102,8 @@ def scoped_tests(text):
     return "import unittest\nfrom legacy_shop import mathutils\n\n" + body + "\n", body
 
 
-def prepare(env_file, *, runner=None):
+def prepare(env_file, *, runner=None, profile="p8"):
+    limits = profile_limits(profile)
     settings = local_settings(env_file)
     before = project_hashes()
     if any(settings["MODEL_API_KEY"].encode() in p.read_bytes() for p in inventory(SOURCE)[1]):
@@ -131,26 +144,30 @@ def prepare(env_file, *, runner=None):
     write(workspace / "target_baseline.json", target_baseline)
     scoped = hashes(original, inventory(original)[1])
     artifacts = {p.name:digest(p) for p in workspace.iterdir() if p.is_file()}
-    manifest = {"status":"awaiting_paid_approval", "file":FILE, "model":settings["MODEL_NAME"],
+    manifest = {"status":"awaiting_paid_approval", "file":FILE, "model":settings["MODEL_NAME"], "profile":profile,
         "source_hashes":before, "scoped_hashes":scoped, "artifacts":artifacts,
         "source_sha256":sha256((original / FILE).read_text(encoding="utf-8").encode()).hexdigest(),
         "test_projection":{"original_sha256":digest(test_file), "class_sha256":sha256(body.encode()).hexdigest(),
                            "class":"MathTests", "tests":3, "full_project_suite":False},
         "images":dict(runner._images), "source_python":golden["python"],
         "golden_cases":len(cases), "source_tests":tests["tests_run"], "chain_intact":evidence.verify(),
-        "limits":{**asdict(LIMITS), "max_cost_usd":str(LIMITS.max_cost_usd)},
-        "max_reserved_cost_usd":"0.049344", "paid_requests":0}
+        "limits":public_limits(limits),
+        "max_reserved_cost_usd":str(limits.max_calls * (limits.max_input_tokens * Decimal("1.25")
+            + limits.max_output_tokens * Decimal("4.25")) / 1000000), "paid_requests":0}
     write(workspace / "prepared.json", manifest)
     return manifest, workspace
 
 
-def validate_prepared(workspace, runner):
+def validate_prepared(workspace, runner, *, profile="p8"):
+    limits = profile_limits(profile)
     workspace = Path(workspace).absolute()
     parent = ROOT / "backend/.work"
     if (workspace.parent != parent or not workspace.name.startswith("p8-mathutils-")
             or any(linked(p) for p in (workspace, *workspace.parents))):
         raise ValueError("Expected a retained P8 preparation workspace")
     manifest = json.loads((workspace / "prepared.json").read_text(encoding="utf-8"))
+    if manifest.get("profile", "p8") != profile or manifest["limits"] != public_limits(limits):
+        raise ValueError("Prepared profile or immutable budget differs from approved execution")
     if manifest["file"] != FILE or manifest["model"] != "muse-spark-1.3" or not manifest["chain_intact"]:
         raise ValueError("Invalid preparation binding")
     assert_originals(manifest["source_hashes"])
@@ -200,17 +217,19 @@ def verify_candidate(runner, candidate, cases, golden, baseline, evidence):
     return result
 
 
-def execute(workspace, env_file, *, acknowledged=False, runner=None, client=None):
+def execute(workspace, env_file, *, acknowledged=False, runner=None, client=None, profile="p8"):
     if acknowledged is not True:
         raise ModelUnavailable("Separate permission and explicit paid acknowledgment required.", "approval_required")
     settings = local_settings(env_file)
+    limits = profile_limits(profile)
     runner = runner or DockerRunner()
-    manifest = validate_prepared(workspace, runner)
+    manifest = validate_prepared(workspace, runner, profile=profile)
     workspace = Path(workspace).absolute()
     # Created exclusively BEFORE constructing a client. A second invocation is
     # forbidden even after a timeout/process crash; paid continuation needs review.
     write(workspace / "execution_started.json", {"prepared_sha256":digest(workspace / "prepared.json"),
-        "scope":FILE, "max_calls":3, "max_cost_usd":"0.05", "mode":"live"})
+        "scope":FILE, "profile":profile, "limits":public_limits(limits),
+        "max_calls":limits.max_calls, "max_cost_usd":str(limits.max_cost_usd), "mode":"live"})
     evidence = Evidence()
     evidence.bind(workspace / "evidence.log")
     evidence.append("prepared_baseline", json.dumps({"manifest_sha256":digest(workspace / "prepared.json"),
@@ -222,9 +241,9 @@ def execute(workspace, env_file, *, acknowledged=False, runner=None, client=None
     cases = load_cases(workspace / "cases.json")
     golden = json.loads((workspace / "golden.json").read_text())
     baseline = json.loads((workspace / "source_tests.json").read_text())
-    client = client or LLMClient(env_file, mode="live", allow_live=True, limits=LIMITS)
+    client = client or LLMClient(env_file, mode="live", allow_live=True, limits=limits)
     session = None
-    report = {"status":"failed", "file":FILE, "mode":"live", "provider_validated":False,
+    report = {"status":"failed", "file":FILE, "mode":"live", "profile":profile, "limits":public_limits(limits), "provider_validated":False,
               "ai_migration":False, "iterations":[], "original_hashes":manifest["source_hashes"],
               "source_python":manifest["source_python"], "images":manifest["images"], "golden_cases":len(cases),
               "source_tests":baseline, "test_projection":manifest["test_projection"],
@@ -234,7 +253,7 @@ def execute(workspace, env_file, *, acknowledged=False, runner=None, client=None
                              "No security fix or full security audit is included.",
                              "Costs are estimated from reported usage; the client cap is not a provider billing guarantee."]}
     try:
-        if (client.mode != "live" or client.limits != LIMITS or client.model != settings["MODEL_NAME"]
+        if (client.mode != "live" or client.limits != limits or client.model != settings["MODEL_NAME"]
                 or client.base_url != settings["MODEL_BASE_URL"] or client._api_key != settings["MODEL_API_KEY"]
                 or client._price_in != Decimal("1.25") or client._price_out != Decimal("4.25")):
             raise ModelUnavailable("Unexpected client/limits; no live fallback.", "live_not_authorized")
@@ -242,7 +261,7 @@ def execute(workspace, env_file, *, acknowledged=False, runner=None, client=None
             live_approval=ModuleLiveApproval(FILE, manifest["source_sha256"]), response_dir=workspace, case_feedback=True)
         translator = StructuredTranslator(session)
         previous = feedback = None
-        for iteration in range(1, 4):
+        for iteration in range(1, limits.max_calls + 1):
             assert_originals(manifest["source_hashes"])
             code = translator.translate(FILE, source, previous=previous, failures=feedback)
             (candidate / FILE).write_text(code, encoding="utf-8")
@@ -347,15 +366,16 @@ def main(argv=None):
     p.add_argument("--workspace", type=Path)
     p.add_argument("--execute", action="store_true")
     p.add_argument("--acknowledge-paid-api", action="store_true")
+    p.add_argument("--profile", choices=("p8", "p8.2"), default="p8")
     args = p.parse_args(argv)
     try:
         if args.prepare and not any((args.execute, args.workspace, args.acknowledge_paid_api)):
-            result, workspace = prepare(args.env_file)
+            result, workspace = prepare(args.env_file, profile=args.profile)
             print(json.dumps({k:result[k] for k in ("status", "model", "golden_cases", "source_tests", "paid_requests", "max_reserved_cost_usd")}))
             print("Retained workspace: " + str(workspace))
             return 0
         if args.execute and args.acknowledge_paid_api and args.workspace and not args.prepare:
-            result = execute(args.workspace, args.env_file, acknowledged=True)
+            result = execute(args.workspace, args.env_file, acknowledged=True, profile=args.profile)
             print(json.dumps({k:result.get(k) for k in ("status", "ai_migration", "model_calls", "budget", "originals_unchanged", "chain_intact", "error")}))
             return 0 if result["status"] == "done" else 2
         raise ModelUnavailable("Choose free --prepare, or a separately approved explicit execution.", "approval_required")
