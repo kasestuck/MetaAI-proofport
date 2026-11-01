@@ -16,6 +16,10 @@ from backend.core.models import Error, RunState, StartRun
 from backend.core.report import render_html, report_data
 from backend.core.runs import RunError, RunStore
 from backend.sandbox.runner import DockerRunner
+from backend.core.control_models import ControlError
+from backend.core.projects import ProjectCatalog
+from backend.core.control import ControlPlane
+from backend.api.control import router as control_router
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -34,6 +38,8 @@ def create_app(root: Path = ROOT, step_seconds: float = 0.2) -> FastAPI:
     if pipeline not in {"verify", "simulation", "fixtures", "analyze", "audit", "compatibility"}:
         raise ValueError("Invalid PROOFPORT_PIPELINE mode.")
     store = RunStore(root, step_seconds, pipeline=pipeline, settings=settings)
+    projects = ProjectCatalog(root)
+    control = ControlPlane(root, store, projects)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -51,6 +57,12 @@ def create_app(root: Path = ROOT, step_seconds: float = 0.2) -> FastAPI:
 
     app = FastAPI(title="Proofport", version="0.1.0", lifespan=lifespan)
     app.state.runs = store
+    app.state.control = control
+
+    @app.exception_handler(ControlError)
+    async def control_error(request: Request, exc: ControlError):
+        content = exc.snapshot() if request.url.path.startswith("/api/v1/") else {"code": exc.code, "message": exc.message}
+        return JSONResponse(status_code=exc.status, content={"error": content})
 
     @app.exception_handler(RunError)
     async def run_error(_: Request, exc: RunError):
@@ -77,7 +89,8 @@ def create_app(root: Path = ROOT, step_seconds: float = 0.2) -> FastAPI:
             raise RunError(503, "offline_only", "Security fixture verification requires PROOFPORT_PIPELINE=fixtures and LLM_MODE=mock. No paid API request is permitted in this stage.")
         if pipeline in {"simulation", "fixtures"} and mode != "mock":
             raise RunError(503, "pipeline_unavailable", "Simulation/fixtures require LLM_MODE=mock and cannot stand in for live or replay model calls.")
-        return {"run_id": store.start(body.source_path, body.max_iterations)}
+        source = projects.resolve(body.source_path)
+        return {"run_id": store.start(str(source), body.max_iterations)}
 
     @app.get("/api/runs/{run_id}", response_model=RunState, response_model_exclude_unset=True)
     async def get_run(run_id: str):
@@ -97,6 +110,8 @@ def create_app(root: Path = ROOT, step_seconds: float = 0.2) -> FastAPI:
         if format == "json":
             return JSONResponse(data, headers=headers)
         return HTMLResponse(render_html(data), headers=headers)
+
+    app.include_router(control_router(control))
 
     # API routes must precede the catch-all static mount.
     frontend = root / "frontend"

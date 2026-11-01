@@ -8,7 +8,7 @@ from backend.core.runs import Run
 
 def report_data(run: Run, *, status: str | None = None) -> dict:
     reported_status = status or run.state.status
-    real = bool(run.verification)
+    real = bool(run.verification) and not run.simulation and run.state.isolation == "docker"
     notice = (
         f"REAL Docker execution; provider={run.execution_mode}; status={reported_status}. "
         "Fixture candidates are not AI migration. Verification covers only the recorded inputs and existing tests. "
@@ -67,7 +67,7 @@ def _security_html(security):
 
 def render_html(data: dict) -> str:
     state = data["state"]
-    real = bool(data.get("verification"))
+    real = bool(data.get("verification")) and state["isolation"] == "docker" and not data["simulation"]
     title = "Proofport simulated run report" if data["simulation"] else ("Proofport Docker verification report" if real else "Proofport unverified source inventory")
     tests_label = "Simulated tests" if data["simulation"] else ("Recorded cases passed" if real else "Executed tests (unavailable)")
     verification = data.get("verification", {})

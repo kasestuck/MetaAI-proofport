@@ -10,6 +10,8 @@ from uuid import uuid4
 
 from backend.core.evidence import Evidence
 from backend.core.models import Error, Finding, Metrics, Module, RunState
+from backend.core.control_models import ControlError, RunSpec
+from backend.core.projects import source_files
 from backend.sandbox.runner import DockerRunner, SandboxError
 
 
@@ -23,20 +25,9 @@ class RunError(Exception):
 IGNORED = {".git", ".venv", "__pycache__", ".pytest_cache"}
 
 
-def source_files(source: Path) -> list[Path]:
-    if source.is_file():
-        return [source] if not source.is_symlink() else []
-    return sorted(
-        path for path in source.rglob("*")
-        if path.is_file() and not path.is_symlink()
-        and not any(part.startswith(".") or part in IGNORED for part in path.relative_to(source).parts)
-        and not any(parent.is_symlink() for parent in path.parents if parent != source.parent)
-    )
-
-
 def hashes_for(source: Path) -> dict[str, str]:
     if source.is_file():
-        return {source.name: sha256(source.read_bytes()).hexdigest()}
+        return {path.name: sha256(path.read_bytes()).hexdigest() for path in source_files(source)}
     return {
         f"{source.name}/{path.relative_to(source).as_posix()}": sha256(path.read_bytes()).hexdigest()
         for path in source_files(source)
@@ -57,6 +48,11 @@ class Run:
     runner: DockerRunner | None = None
     evidence: Evidence = field(default_factory=Evidence)
     started: float = field(default_factory=monotonic)
+    spec: RunSpec | None = None
+    use_real: bool = False
+    pending_status: str | None = None
+    finalizing: bool = False
+    finalized: bool = False
 
 
 class RunStore:
@@ -73,7 +69,7 @@ class RunStore:
         self.tasks: set[asyncio.Task] = set()
         self.active: str | None = None
 
-    def start(self, source_path: str, max_iterations: int) -> str:
+    def start(self, source_path: str, max_iterations: int, *, spec: RunSpec | None = None) -> str:
         # No await between the busy check and reserving the run slot.
         if self.active is not None:
             raise RunError(409, "run_busy", "Another run is already in progress.")
@@ -81,7 +77,8 @@ class RunStore:
         if not source.is_absolute():
             source = self.root / source
         source = source.resolve()
-        universal = self.pipeline in {"analyze", "audit", "compatibility"}
+        pipeline = spec.pipeline if spec else self.pipeline
+        universal = pipeline in {"analyze", "audit", "compatibility"}
         if not source.is_dir() and not (universal and source.is_file() and source.suffix == ".py"):
             raise RunError(400, "source_not_found", "The source folder does not exist.")
         try:
@@ -96,7 +93,7 @@ class RunStore:
                 text = path.read_text(encoding="utf-8", errors="replace")
                 modules[name] = (f"{source.name}/{relative.as_posix()}", text)
                 functions = len(re.findall(r"^\s*def [a-zA-Z]\w*\(", text, re.MULTILINE))
-                cases = max(8, min(15, functions * 3)) if self.pipeline == "simulation" else 0
+                cases = max(8, min(15, functions * 3)) if pipeline == "simulation" else 0
                 states.append(Module(name=name, tests_total=cases))
         except OSError:
             raise RunError(400, "source_unreadable", "The source folder could not be read.") from None
@@ -112,8 +109,26 @@ class RunStore:
             modules=states, hashes={**originals, "unchanged": None},
             metrics=Metrics(tests_total=sum(module.tests_total for module in states)),
         )
-        simulation = self.pipeline == "simulation"
+        controlled = spec is not None
+        if spec and tuple(sorted(originals.items())) != spec.source_hashes:
+            raise RunError(409, "source_changed", "Project changed after preflight; create a new request.")
+        simulation = pipeline == "simulation"
+        if spec is None:
+            operation = "migration" if pipeline in {"verify", "fixtures", "simulation"} else pipeline
+            execution = {"simulation": "simulation", "fixtures": "offline_fixtures", "verify": "live"}.get(pipeline, "offline")
+            spec = RunSpec(operation, "legacy", str(source), self.settings.get("PROOFPORT_SOURCE_VERSION"),
+                           self.settings.get("PROOFPORT_TARGET_VERSION"), execution, pipeline, max_iterations,
+                           settings=tuple(sorted((key, str(value)) for key, value in self.settings.items()
+                                                 if value is not None and key in {
+                                                     "SANDBOX_TIMEOUT_SECONDS", "PROOFPORT_CASES_FILE", "PROOFPORT_FIXTURE_FILE",
+                                                     "PROOFPORT_SECURITY_FIXTURES", "PROOFPORT_SOURCE_VERSION", "PROOFPORT_TARGET_VERSION",
+                                                     "PROOFPORT_VERIFY_RUNTIME", "PROOFPORT_VERIFICATION_LEVEL", "PROOFPORT_REQUIRED_TESTS"})),
+                           source_hashes=tuple(sorted(originals.items())))
         run = Run(state, source, originals, modules, max_iterations, simulation=simulation)
+        run.spec = spec
+        run.use_real = (not simulation) if controlled else self.real_enabled
+        if controlled:
+            run.verification["control"] = {"parameters": spec.public(), "live_enabled": False}
         notice = (
             "SIMULATED run: no code execution, migration, model calls, or security fixes."
             if simulation else "Static source inventory only; no code execution, migration, tests, or security scan."
@@ -123,8 +138,7 @@ class RunStore:
         run_id = uuid4().hex
         self.runs[run_id] = run
         self.active = run_id
-        worker = self._universal_pipeline if universal else (self._simulate if simulation else (self._real_pipeline if self.real_enabled else self._verification_unavailable))
-        task = asyncio.create_task(worker(run_id))
+        task = asyncio.create_task(self._dispatch(run_id))
         self.tasks.add(task)
         task.add_done_callback(self.tasks.discard)
         return run_id
@@ -133,7 +147,7 @@ class RunStore:
         if run_id not in self.runs:
             raise RunError(404, "run_not_found", "The requested run does not exist.")
         run = self.runs[run_id]
-        if run.state.status in {"queued", "running"}:
+        if run.state.status in {"queued", "running"} and not run.finalizing:
             run.state.metrics.seconds = round(monotonic() - run.started, 3)
         run.state.chain_intact = run.evidence.verify()
         if not run.state.chain_intact and run.state.status == "done":
@@ -144,44 +158,105 @@ class RunStore:
     async def _pause(self):
         await asyncio.sleep(self.step_seconds)
 
+    async def _dispatch(self, run_id):
+        run = self.runs[run_id]
+        pipeline = run.spec.pipeline
+        worker = self._universal_pipeline if pipeline in {"analyze", "audit", "compatibility"} else (self._simulate if run.simulation else (self._real_pipeline if run.use_real else self._verification_unavailable))
+        try:
+            await worker(run_id)
+        except asyncio.CancelledError:
+            run.pending_status = "failed"
+            run.state.error = Error(code="run_interrupted", message="Run interrupted by application shutdown.")
+            raise
+        except ControlError as exc:
+            self._fail(run, exc.code, exc.message)
+        except Exception:
+            self._fail(run, "verification_unavailable", "Worker could not complete; no success is claimed.")
+        finally:
+            run.finalizing = True
+            try:
+                if run.workspace:
+                    await asyncio.to_thread(self._finish, run)
+                else:
+                    self._finish(run)
+            finally:
+                self.active = None
+
+    @staticmethod
+    def _finish(run):
+        terminal = run.pending_status or "failed"
+        try:
+            run.state.phase = "reporting"
+            run.state.metrics.seconds = round(monotonic() - run.started, 3)
+            run.state.hashes["unchanged"] = hashes_for(run.source) == run.originals
+            if not run.state.hashes["unchanged"]:
+                terminal = "failed"
+                run.state.error = Error(code="source_changed", message="Original sources changed during the run.")
+            run.state.chain_intact = run.evidence.verify()
+            if not run.state.chain_intact:
+                terminal = "failed"
+                run.state.error = Error(code="evidence_corrupted", message="Evidence integrity failed.")
+            if terminal == "failed":
+                for module in run.state.modules:
+                    module.status = "failed"
+            if run.workspace:
+                import json
+                from backend.core.report import report_data, render_html
+                data = report_data(run, status=terminal)
+                for name, content in (("report.json", json.dumps(data, indent=2, ensure_ascii=True)), ("report.html", render_html(data))):
+                    temporary = run.workspace / (name + ".tmp")
+                    temporary.write_text(content, encoding="utf-8")
+                    temporary.replace(run.workspace / name)
+        except Exception:
+            terminal = "failed"
+            run.state.error = Error(code="report_unavailable", message="Finalization failed; report or hash verification could not complete.")
+            for module in run.state.modules:
+                module.status = "failed"
+        finally:
+            run.state.status = terminal
+            run.finalized = True
+            run.finalizing = False
+
+    def _runner(self, run):
+        settings = dict(run.spec.settings)
+        runner = DockerRunner(timeout=float(settings.get("SANDBOX_TIMEOUT_SECONDS", "30")))
+        for tag, expected in run.spec.images:
+            if runner.image_id(tag) != expected:
+                raise ControlError("runtime_changed", "Runtime image changed after preflight; request a new preflight.", 503)
+        return runner
+
     async def _real_pipeline(self, run_id: str):
         from backend.core.pipeline import execute
         run = self.runs[run_id]
         try:
-            run.runner = DockerRunner(timeout=float(self.settings.get("SANDBOX_TIMEOUT_SECONDS", "30")))
+            run.runner = self._runner(run)
         except (ValueError, SandboxError):
             self._fail(run, "invalid_settings", "SANDBOX_TIMEOUT_SECONDS must be finite, positive and at most 300 seconds.")
-            self.active = None
             return
-        mode = "fixtures" if self.pipeline == "fixtures" else "live"
-        worker = asyncio.create_task(asyncio.to_thread(execute, run, run_id, self.root, self.settings, mode))
+        mode = "fixtures" if run.spec.pipeline == "fixtures" else "live"
+        worker = asyncio.create_task(asyncio.to_thread(execute, run, run_id, self.root, dict(run.spec.settings), mode))
         try:
             await asyncio.shield(worker)
         except asyncio.CancelledError:
             await asyncio.to_thread(run.runner.cancel)
             await worker
             raise
-        finally:
-            self.active = None
 
     async def _universal_pipeline(self, run_id: str):
         from backend.core.universal import execute
         run = self.runs[run_id]
         try:
-            run.runner = DockerRunner(timeout=float(self.settings.get("SANDBOX_TIMEOUT_SECONDS", "30")))
+            run.runner = self._runner(run)
         except (ValueError, SandboxError):
             self._fail(run, "invalid_settings", "Invalid Docker timeout; select 0 < seconds <= 300.")
-            self.active = None
             return
-        worker = asyncio.create_task(asyncio.to_thread(execute, run, run_id, self.root, self.settings, self.pipeline))
+        worker = asyncio.create_task(asyncio.to_thread(execute, run, run_id, self.root, dict(run.spec.settings), run.spec.pipeline))
         try:
             await asyncio.shield(worker)
         except asyncio.CancelledError:
             await asyncio.to_thread(run.runner.cancel)
             await worker
             raise
-        finally:
-            self.active = None
 
     async def _verification_unavailable(self, run_id: str):
         run = self.runs[run_id]
@@ -204,7 +279,6 @@ class RunStore:
         finally:
             run.state.metrics.seconds = round(monotonic() - run.started, 3)
             run.state.chain_intact = run.evidence.verify()
-            self.active = None
 
     async def _simulate(self, run_id: str):
         run = self.runs[run_id]
@@ -259,7 +333,7 @@ class RunStore:
             state.hashes["unchanged"] = hashes_for(run.source) == run.originals
             if not state.hashes["unchanged"]:
                 raise RunError(409, "source_changed", "Original files changed during the run.")
-            state.status = "done"
+            run.pending_status = "done"
             run.evidence.append("run_finished", "SIMULATED run complete. Real original file hashes are unchanged.")
         except asyncio.CancelledError:
             self._fail(run, "run_interrupted", "Run interrupted by application shutdown.")
@@ -271,11 +345,11 @@ class RunStore:
         finally:
             state.metrics.seconds = round(monotonic() - run.started, 3)
             state.chain_intact = run.evidence.verify()
-            self.active = None
 
     @staticmethod
     def _fail(run: Run, code: str, message: str):
-        run.state.status = "failed"
+        run.state.status = "running"
+        run.pending_status = "failed"
         run.state.error = Error(code=code, message=message)
         run.evidence.append("error", message)
         run.evidence.append("run_finished", "Run failed; no migration was verified.")

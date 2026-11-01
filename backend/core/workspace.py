@@ -5,11 +5,8 @@ import shutil
 
 
 def prepare(source: Path, destination: Path):
-    for path in source.rglob("*"):
-        if path.is_symlink():
-            raise ValueError("Symbolic links in source projects require review.")
+    from backend.core.projects import copy_project
     destination.mkdir(parents=True, exist_ok=False)
-    ignore = shutil.ignore_patterns(".*", "__pycache__", "*.pyc", "*.pyo")
-    shutil.copytree(source, destination / "copy", ignore=ignore)
+    copy_project(source, destination / "copy")
     shutil.copytree(destination / "copy", destination / "migrated")
     return destination / "copy", destination / "migrated"
