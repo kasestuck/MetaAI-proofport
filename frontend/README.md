@@ -1,4 +1,12 @@
-# Proofport Console — P4.2
+# Proofport Console — Python / PHP
+
+P6.5 now adds language selection and verified PHP migration/audit/compatibility
+controls on `integration/p4`. Read [PHP_INTEGRATION.md](PHP_INTEGRATION.md) for
+the current operation policies, profiles, actual browser/test results and manual
+verification steps. Capabilities and project catalogs determine readiness; PHP
+fixtures never receive AI labels. No backend or sample code changed.
+
+The P4.2 sections below describe the preserved Python/legacy integration.
 
 Static HTML/CSS/vanilla JavaScript; no build step, dependencies, CDN or third-party requests at runtime. The existing three-column redesign and themes are preserved. The backend serves `frontend/` at `/` on the same origin.
 
