@@ -1,60 +1,101 @@
-/* Design tokens. Change colors, spacing and motion here only. */
+/*
+ * Design tokens. Visual language: near-black canvas, softly bordered cards,
+ * pill navigation, blue accent for primary actions, green for verified
+ * states. The light theme is a single attribute swap on <html>
+ * (data-theme="light"); every component reads colors from here.
+ */
 :root {
-  /* Palette (fixed by product brief) */
-  --bg: #090D16;
-  --surface: #111827;
-  --surface-2: #182235;
-  --surface-3: #1E2A40;
-  --accent: #4F8CFF;
-  --success: #22C55E;
-  --warning: #F59E0B;
-  --danger: #EF4444;
-  --text: #F3F6FC;
-  --text-2: #94A3B8;
-  --text-3: #64748B;
+  --bg: #0d0f12;
+  --surface: #16191d;       /* cards, top bar, right column */
+  --surface-2: #1f2933;     /* inset fills, pills, active rows */
+  --surface-3: #1a1e23;     /* hover */
+  --accent: #4a9eff;
+  --accent-2: #7b5cff;      /* gradient partner for logo and bars */
+  --accent-dim: #2b5c94;
+  --success: #3ddc84;
+  --warning: #f2b84b;
+  --danger: #f2643b;
+  --text: #e6e9ee;
+  --text-2: #8b93a1;
+  --text-3: #5f6773;
+  --on-accent: #ffffff;
 
-  /* Derived, translucent tints for pills and subtle fills */
-  --accent-soft: rgba(79, 140, 255, 0.12);
-  --success-soft: rgba(34, 197, 94, 0.12);
-  --warning-soft: rgba(245, 158, 11, 0.12);
-  --danger-soft: rgba(239, 68, 68, 0.12);
-  --neutral-soft: rgba(148, 163, 184, 0.10);
+  --accent-soft: rgba(74, 158, 255, 0.14);
+  --success-soft: rgba(61, 220, 132, 0.14);
+  --warning-soft: rgba(242, 184, 75, 0.14);
+  --danger-soft: rgba(242, 100, 59, 0.14);
+  --neutral-soft: rgba(139, 147, 161, 0.12);
 
-  --border: rgba(148, 163, 184, 0.12);
-  --border-strong: rgba(148, 163, 184, 0.22);
-  --focus: 0 0 0 2px var(--bg), 0 0 0 4px rgba(79, 140, 255, 0.55);
-  --glow-accent: 0 0 0 1px rgba(79, 140, 255, 0.35), 0 0 18px -6px rgba(79, 140, 255, 0.45);
+  --border: #24282e;
+  --border-strong: #2f353d;
+  --overlay: rgba(13, 15, 18, 0.88);
+  --shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  --focus: 0 0 0 2px var(--bg), 0 0 0 4px rgba(74, 158, 255, 0.55);
+  --glow-accent: 0 0 0 1px rgba(74, 158, 255, 0.35), 0 0 16px -6px rgba(74, 158, 255, 0.45);
+  --bar-gradient: linear-gradient(90deg, var(--accent), var(--accent-2));
 
   /* Typography: system stacks only (no web font downloads). */
-  --font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Roboto, Arial, sans-serif;
-  --font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
   --fs-xs: 11px;
   --fs-sm: 12.5px;
-  --fs-md: 14px;
+  --fs-md: 13.5px;
   --fs-lg: 16px;
-  --fs-xl: 20px;
-  --fs-2xl: 28px;
+  --fs-xl: 18px;
+  --fs-2xl: 26px;
 
   /* Spacing & shape */
   --sp-1: 4px;
   --sp-2: 8px;
   --sp-3: 12px;
   --sp-4: 16px;
-  --sp-5: 20px;
-  --sp-6: 24px;
-  --sp-8: 32px;
-  --radius-sm: 6px;
-  --radius: 10px;
+  --sp-5: 18px;
+  --sp-6: 22px;
+  --sp-8: 28px;
+  --radius-sm: 9px;
+  --radius: 12px;
   --radius-lg: 14px;
+  --radius-pill: 999px;
 
-  --sidebar-w: 248px;
-  --content-max: 1560px;
+  --left-w: 260px;
+  --right-w: 320px;
 
   /* Motion */
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   --t-fast: 120ms;
-  --t-med: 220ms;
+  --t-med: 200ms;
   --t-slow: 600ms;
+
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #f4f6f9;
+  --surface: #ffffff;
+  --surface-2: #e7ebf1;
+  --surface-3: #eef1f5;
+  --accent: #2b7fff;
+  --accent-dim: #2b7fff;
+  --success: #16a35a;
+  --warning: #c27c0e;
+  --danger: #d9481f;
+  --text: #1a1e23;
+  --text-2: #5f6773;
+  --text-3: #949cab;
+
+  --accent-soft: rgba(43, 127, 255, 0.12);
+  --success-soft: rgba(22, 163, 90, 0.12);
+  --warning-soft: rgba(194, 124, 14, 0.12);
+  --danger-soft: rgba(217, 72, 31, 0.11);
+  --neutral-soft: rgba(95, 103, 115, 0.10);
+
+  --border: #dde2e9;
+  --border-strong: #c9d0da;
+  --overlay: rgba(244, 246, 249, 0.9);
+  --shadow: 0 6px 24px rgba(20, 30, 50, 0.08);
+  --glow-accent: 0 0 0 1px rgba(43, 127, 255, 0.35);
+
+  color-scheme: light;
 }
 
 @media (prefers-reduced-motion: reduce) {

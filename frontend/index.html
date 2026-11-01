@@ -1,77 +1,76 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="dark">
   <title>Proofport Console</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111827'/%3E%3Cpath d='M9 23V9h8a5 5 0 0 1 0 10h-4' fill='none' stroke='%234F8CFF' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%234a9eff'/%3E%3Cstop offset='1' stop-color='%237b5cff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='32' height='32' rx='9' fill='url(%23g)'/%3E%3Ctext x='16' y='22' font-family='Arial' font-weight='800' font-size='17' fill='white' text-anchor='middle'%3EP%3C/text%3E%3C/svg%3E">
+  <!-- Apply the saved theme before first paint to avoid a flash. -->
+  <script>try { var t = localStorage.getItem("proofport.console.theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}</script>
   <link rel="stylesheet" href="css/tokens.css">
   <link rel="stylesheet" href="css/base.css">
   <link rel="stylesheet" href="css/components.css">
   <link rel="stylesheet" href="css/views.css">
 </head>
 <body>
-  <a class="skip-link" href="#main">Skip to content</a>
+  <a class="skip-link" href="#center">Skip to content</a>
 
   <div class="app">
-    <!-- Sidebar navigation. Routes are hash based (#/overview) because the
-         backend serves this folder as static files without an SPA fallback. -->
-    <aside class="sidebar" aria-label="Primary">
+    <!-- Top bar: brand, current run pill, primary action, mode and theme. -->
+    <header class="topbar">
       <div class="brand">
-        <span class="brand-mark" aria-hidden="true">
-          <svg viewBox="0 0 32 32"><path d="M9 23V9h8a5 5 0 0 1 0 10h-4" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </span>
-        <span class="brand-text">
-          <span class="brand-name">Proofport</span>
-          <span class="brand-sub">Modernization &amp; Security</span>
-        </span>
+        <span class="logo" aria-hidden="true">P</span>
+        <span>Proofport</span>
       </div>
-
-      <nav class="nav" id="nav">
-        <a class="nav-item" href="#/overview" data-route="overview"><span class="nav-icon" data-icon="overview"></span><span class="nav-label">Overview</span></a>
-        <a class="nav-item" href="#/migration" data-route="migration"><span class="nav-icon" data-icon="migration"></span><span class="nav-label">Migration</span></a>
-        <a class="nav-item" href="#/security" data-route="security"><span class="nav-icon" data-icon="security"></span><span class="nav-label">Security</span><span class="nav-count" id="nav-security-count" hidden></span></a>
-        <a class="nav-item" href="#/compatibility" data-route="compatibility"><span class="nav-icon" data-icon="compatibility"></span><span class="nav-label">Compatibility</span></a>
-        <a class="nav-item" href="#/evidence" data-route="evidence"><span class="nav-icon" data-icon="evidence"></span><span class="nav-label">Evidence</span></a>
-      </nav>
-
-      <div class="sidebar-foot">
-        <div class="conn" id="conn" data-state="unknown">
-          <span class="dot" aria-hidden="true"></span>
-          <span class="conn-text" id="conn-text">Connecting…</span>
-        </div>
-        <div class="sidebar-meta">Same-origin API · no external requests</div>
+      <div class="case-pill" id="run-pill">No run selected</div>
+      <div class="spacer"></div>
+      <!-- Live / Mock / Replay: exactly one segment is active. -->
+      <div class="mode-switch" id="mode-switch" role="status" aria-label="AI execution mode">
+        <span class="mode-seg" data-mode="live">Live</span>
+        <span class="mode-seg" data-mode="mock">Mock</span>
+        <span class="mode-seg" data-mode="replay">Replay</span>
       </div>
-    </aside>
+      <a class="btn btn--primary" id="btn-new-run" href="#/migration">New run</a>
+      <span class="conn" id="conn" data-state="unknown" title="Connecting…"><span class="dot" aria-hidden="true"></span><span class="conn-text" id="conn-text">Connecting…</span></span>
+      <button class="icon-btn" id="btn-theme" type="button" title="Switch light / dark theme" aria-label="Switch light / dark theme">◐</button>
+    </header>
 
-    <div class="main-col">
-      <header class="topbar">
-        <div class="topbar-title">
-          <h1 id="view-title">Overview</h1>
-          <p id="view-sub" class="muted">System status and current run</p>
+    <!-- Pill tabs. Routes are hash based (#/overview) because the backend
+         serves this folder as static files without an SPA fallback. -->
+    <nav class="tabbar" id="nav" aria-label="Sections">
+      <a class="tab" href="#/overview" data-route="overview">Overview</a>
+      <a class="tab" href="#/migration" data-route="migration">Migration</a>
+      <a class="tab" href="#/security" data-route="security">Security<span class="nav-count" id="nav-security-count" hidden></span></a>
+      <a class="tab" href="#/compatibility" data-route="compatibility">Compatibility</a>
+      <a class="tab" href="#/evidence" data-route="evidence">Evidence</a>
+    </nav>
+
+    <div class="body">
+      <!-- Left: runs known to this browser (not a server-side history). -->
+      <aside class="column left" aria-label="Runs">
+        <div class="column-head">
+          <div class="section-label">Runs</div>
+          <a class="icon-btn" href="#/migration" title="Start a new run" aria-label="Start a new run">+</a>
         </div>
-        <div class="topbar-status">
-          <!-- Live / Mock / Replay: exactly one segment is active. -->
-          <div class="mode-switch" id="mode-switch" role="status" aria-label="AI execution mode">
-            <span class="mode-seg" data-mode="live">Live</span>
-            <span class="mode-seg" data-mode="mock">Mock</span>
-            <span class="mode-seg" data-mode="replay">Replay</span>
-          </div>
-          <div class="run-chip" id="run-chip" hidden></div>
+        <div id="run-list"></div>
+      </aside>
+
+      <!-- Center: the active section. -->
+      <main class="column center" id="center" tabindex="-1">
+        <div class="center-head">
+          <div class="section-label" id="view-title">Overview</div>
+          <p class="center-sub" id="view-sub">System status and the current run</p>
         </div>
-      </header>
-
-      <!-- Persistent honesty banners (offline backend, Meta not connected, simulation, replay). -->
-      <div class="banners" id="banners" aria-live="polite"></div>
-
-      <main id="main" class="content" tabindex="-1">
+        <div class="banners" id="banners" aria-live="polite"></div>
         <section class="view" data-view="overview" aria-labelledby="view-title"></section>
         <section class="view" data-view="migration" aria-labelledby="view-title" hidden></section>
         <section class="view" data-view="security" aria-labelledby="view-title" hidden></section>
         <section class="view" data-view="compatibility" aria-labelledby="view-title" hidden></section>
         <section class="view" data-view="evidence" aria-labelledby="view-title" hidden></section>
       </main>
+
+      <!-- Right: system status and run context, always visible. -->
+      <aside class="column right" id="right" aria-label="Context"></aside>
     </div>
   </div>
 
@@ -91,6 +90,7 @@
   <script src="js/views/security.js"></script>
   <script src="js/views/compatibility.js"></script>
   <script src="js/views/evidence.js"></script>
+  <script src="js/panels.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

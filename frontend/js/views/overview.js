@@ -11,30 +11,6 @@
 
   let root;
 
-  function systemCard(state) {
-    const health = state.health;
-    const data = health.data;
-    const online = health.status === "online";
-    const llm = L.llmMode(online && data ? data.llm_mode : null);
-    const item = (name, iconName, value, note) => h("div", { class: "sys-item" },
-      h("span", { class: "row", style: { gap: "8px" } }, icon(iconName, "dim icon-inline"), h("span", { class: "sys-name" }, name)),
-      h("span", { class: "row", style: { gap: "8px", justifyContent: "flex-end" } }, note ? h("span", { class: "dim", style: { fontSize: "12px" } }, note) : null, value));
-
-    return card({ title: "System", sub: "From GET /api/health" },
-      h("div", { class: "sys-list" },
-        item("Backend", "server",
-          health.status === "online" ? badge("Online", "ok") : health.status === "offline" ? badge("Offline", "err") : badge("Checking", "muted"),
-          health.checkedAt ? "checked " + new Date(health.checkedAt).toLocaleTimeString() : null),
-        item("Docker", "box",
-          !data ? badge("Unknown", "muted") : data.docker ? badge("Available", "ok") : badge("Unavailable", "err"),
-          data ? "at server start" : null),
-        item("LLM mode", "cpu", (() => { const b = badge(llm.label, llm.tone); b.title = llm.desc; return b; })(), data ? "configuration" : null),
-        item("Meta AI", "link",
-          !data ? badge("Unknown", "muted") : data.llm_mode === "live" ? badge("Configured · unverified", "warn") : badge("Not connected", "muted"))),
-      h("p", { class: "dim", style: { fontSize: "12px", marginTop: "12px" } },
-        "Health shows app availability, not readiness of a specific operation. Pipeline, Python versions and fixtures are chosen by the operator on the server."));
-  }
-
   function runCard(state) {
     const run = state.run;
     if (!run) {
@@ -166,8 +142,9 @@
     const run = state.run;
     root.replaceChildren(
       h("div", { class: "stack-lg" },
-        h("div", { class: "ov-hero" }, runCard(state), systemCard(state)),
+        // System status lives in the right-hand panel (js/panels.js).
         h("div", { class: "grid grid-4" }, moduleKpi(run), testsKpi(run), securityKpi(run), timeKpi(run)),
+        runCard(state),
         h("div", { class: "grid grid-2" }, usageCard(run), integrityCard(run))));
   }
 

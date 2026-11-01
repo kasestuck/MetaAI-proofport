@@ -1,6 +1,6 @@
 /*
- * Shell: hash router, top bar (mode switch, run chip), persistent banners,
- * sidebar connection indicator. Views live in js/views/*.js and register
+ * Shell: hash router, top bar (run pill, mode switch, connection, theme),
+ * pill tabs, persistent banners and the side panels (js/panels.js). Views live in js/views/*.js and register
  * themselves on PP.views as { title, sub, mount(root), update(state) }.
  */
 (function (PP) {
@@ -33,7 +33,8 @@
         section.style.animation = "";
       }
     }
-    for (const link of document.querySelectorAll(".nav-item")) {
+    document.getElementById("center").scrollTop = 0;
+    for (const link of document.querySelectorAll(".tab")) {
       if (link.dataset.route === route) link.setAttribute("aria-current", "page");
       else link.removeAttribute("aria-current");
     }
@@ -112,18 +113,25 @@
     }
   }
 
-  function renderRunChip(state) {
-    const chip = document.getElementById("run-chip");
+  function renderRunPill(state) {
+    const pill = document.getElementById("run-pill");
     const run = state.run;
-    if (!run) { chip.hidden = true; return; }
-    chip.hidden = false;
+    if (!run) { pill.replaceChildren("No run selected"); return; }
     const status = run.state ? L.runStatus(run.state.status) : { label: run.lost ? "Lost" : "Connecting", tone: run.lost ? "err" : "muted" };
     const live = run.state && (run.state.status === "running" || run.state.status === "queued");
-    chip.replaceChildren(
-      h("span", { class: "dim" }, run.origin === "replay" ? "Saved" : "Run"),
-      h("span", { class: "mono" }, fmt.shortId(run.id)),
+    pill.replaceChildren(
+      h("span", null, run.origin === "replay" ? "Saved report" : "Run"),
+      h("strong", { title: run.id }, run.origin === "replay" ? run.fileName : fmt.shortId(run.id)),
       PP.util.badge(status.label, status.tone, live ? "badge--live" : ""),
     );
+  }
+
+  // ---------- Theme (dark default; choice remembered in this browser) ----------
+  const THEME_KEY = "proofport.console.theme";
+  function toggleTheme() {
+    const next = document.documentElement.dataset.theme === "light" ? "dark" : "light";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem(THEME_KEY, next); } catch (_) { /* non-critical */ }
   }
 
   function renderConn(state) {
@@ -201,16 +209,17 @@
   function renderShell(state) {
     renderConn(state);
     renderModeSwitch(state);
-    renderRunChip(state);
+    renderRunPill(state);
     renderNavCount(state);
     renderBanners(state);
+    PP.panels.render(state);
     if (current) updateView(current, current === "overview"); // overview shows the health check time
   }
 
   PP.app = { refresh };
 
   function init() {
-    for (const el of document.querySelectorAll("[data-icon]")) el.replaceChildren(icon(el.dataset.icon));
+    document.getElementById("btn-theme").addEventListener("click", toggleTheme);
     window.addEventListener("hashchange", navigate);
     store.subscribe(renderShell);
     navigate();

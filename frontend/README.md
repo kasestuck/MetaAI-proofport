@@ -33,12 +33,27 @@ Do not enable `verify` + `live` with a real key just to look at the UI: that
 path can send paid requests. After editing frontend files, hard-refresh the
 browser (Ctrl+F5); StaticFiles allows the browser to cache scripts.
 
+## Layout
+
+Top bar (brand, current-run pill, Live/Mock/Replay switch, New run,
+connection dot, theme toggle) → pill tabs → three columns:
+
+- **Left – Runs**: runs opened in this browser (live run ids persisted in
+  `localStorage`, replayed reports kept in memory). Click to re-open; a run
+  the server no longer has shows as "not on server". Not a server history.
+- **Center**: the active section.
+- **Right – Context**: system status, current run, module and finding bars,
+  integrity. Visible on every tab.
+
+Below 1280 px the columns stack (section, context, runs). The theme choice is
+stored under `proofport.console.theme`.
+
 ## Structure
 
 ```
-index.html            Shell: sidebar, top bar, five view containers
-css/tokens.css        Palette, type scale, spacing, motion (reduced-motion aware)
-css/base.css          Reset, shell layout, responsive breakpoints (1180 / 760 px)
+index.html            Shell: top bar, pill tabs, three columns (runs | section | context)
+css/tokens.css        Dark + light palettes (data-theme on <html>), type, spacing, motion
+css/base.css          Reset, shell layout, responsive breakpoints (1280 / 760 px)
 css/components.css    Cards, badges, buttons, tables, progress, banners, toasts
 css/views.css         Stepper, module table, timeline, findings, evidence
 js/config.js          Deployment profile (poll interval, optional declared pipeline, path presets)
@@ -47,7 +62,8 @@ js/api.js             The five endpoints + ApiError normalisation
 js/labels.js          Honest labelling rules: statuses, provenance, error hints
 js/integrity.js       Browser re-verification of the evidence hash chain (WebCrypto)
 js/store.js           State, health loop, sequential polling, finalisation, replay
-js/app.js             Hash router, banners, mode switch, render scheduling
+js/panels.js          Left run list and right context panel (system, run, bars, integrity)
+js/app.js             Hash router, banners, mode switch, theme toggle, render scheduling
 js/views/*.js         overview, migration, security, compatibility, evidence (+ shared)
 ```
 

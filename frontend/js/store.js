@@ -23,6 +23,10 @@
     run: null,
     starting: false,
     startError: null,
+    // Runs opened in this browser, newest first. Live entries persist in
+    // localStorage (ids only); replay entries keep the report in memory only.
+    // This is not server history: the backend forgets runs on restart.
+    history: [],
   };
 
   const listeners = new Set();
@@ -40,6 +44,7 @@
     emitQueued = true;
     queueMicrotask(() => {
       emitQueued = false;
+      trackHistory();
       for (const fn of listeners) {
         try { fn(state); } catch (err) { console.error("[proofport] render failed", err); }
       }
@@ -61,6 +66,64 @@
   }
   function forget() {
     try { localStorage.removeItem(cfg.storageKey); } catch (_) { /* ignore */ }
+  }
+
+  // ---------- Run list (this browser only) ----------
+  const HISTORY_KEY = cfg.storageKey + ".history";
+  const HISTORY_MAX = 12;
+
+  function loadHistory() {
+    try {
+      const list = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+      return Array.isArray(list) ? list.filter((e) => e && typeof e.id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(e.id)).slice(0, HISTORY_MAX) : [];
+    } catch (_) { return []; }
+  }
+
+  function saveHistory() {
+    try {
+      const live = state.history.filter((e) => e.origin === "live").map(({ report, ...rest }) => rest);
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(live));
+    } catch (_) { /* ignore */ }
+  }
+
+  /** Upsert the current run into the list; called before every render. */
+  function trackHistory() {
+    const run = state.run;
+    if (!run) return;
+    const key = run.origin === "replay" ? "replay:" + run.fileName : run.id;
+    const st = run.state;
+    const entry = {
+      key, id: run.id, origin: run.origin, source: run.source, fileName: run.fileName,
+      startedAt: run.startedAt, maxIterations: run.maxIterations,
+      status: run.lost ? "lost" : st ? st.status : "connecting",
+      events: run.events.length,
+      pipeline: run.report ? (run.report.simulation ? "simulation" : run.report.settings && run.report.settings.pipeline) : null,
+      report: run.origin === "replay" ? run.report : undefined,
+    };
+    const index = state.history.findIndex((e) => e.key === key);
+    const before = index >= 0 ? JSON.stringify([state.history[index].status, state.history[index].events, state.history[index].pipeline]) : null;
+    if (index >= 0) state.history[index] = entry;
+    else state.history.unshift(entry);
+    if (state.history.length > HISTORY_MAX) state.history.length = HISTORY_MAX;
+    if (before !== JSON.stringify([entry.status, entry.events, entry.pipeline])) saveHistory();
+  }
+
+  /** Re-open a run from the list: re-attach to the server, or re-show a replayed report. */
+  function openHistory(key) {
+    const entry = state.history.find((e) => e.key === key);
+    if (!entry) return;
+    const run = state.run;
+    if (run && (run.origin === "replay" ? "replay:" + run.fileName : run.id) === key) return;
+    if (entry.origin === "replay" && entry.report) openReplayData(entry.report, entry.fileName);
+    else if (entry.origin === "live") attach(entry.id, { source: entry.source, maxIterations: entry.maxIterations, startedAt: entry.startedAt, restored: true });
+  }
+
+  function removeHistory(key) {
+    state.history = state.history.filter((e) => e.key !== key);
+    saveHistory();
+    const run = state.run;
+    if (run && (run.origin === "replay" ? "replay:" + run.fileName : run.id) === key) clearRun();
+    else emit();
   }
 
   // ---------- Health ----------
@@ -310,10 +373,16 @@
       PP.util.toast("Cannot open report", problem, "err");
       return false;
     }
+    openReplayData(data, file.name || "report.json");
+    PP.util.toast("Saved report loaded", "Replaying " + (file.name || "report.json") + " locally. Nothing was sent to the backend.", "ok");
+    return true;
+  }
+
+  function openReplayData(data, fileName) {
     pollToken++; // stop polling a live run; it keeps running on the server
-    const match = /proofport-([A-Za-z0-9]+)\.json$/.exec(file.name || "");
+    const match = /proofport-([A-Za-z0-9]+)\.json$/.exec(fileName);
     const run = newRun(match ? match[1] : "saved-report", null, "replay");
-    run.fileName = file.name || "report.json";
+    run.fileName = fileName;
     applyState(run, data.state);
     applyEvents(run, data.events);
     run.report = data;
@@ -321,13 +390,13 @@
     run.finalized = true;
     state.run = run;
     emit();
-    PP.util.toast("Saved report loaded", "Replaying " + run.fileName + " locally. Nothing was sent to the backend.", "ok");
-    return true;
   }
 
   function init() {
+    state.history = loadHistory().map((e) => Object.assign({}, e, { key: e.id, origin: "live" }));
+    emit();
     healthLoop();
   }
 
-  PP.store = { state, subscribe, emit, init, startRun, clearRun, retryReport, loadReplay, leaveReplay, recall, TERMINAL };
+  PP.store = { state, subscribe, emit, init, startRun, clearRun, retryReport, loadReplay, leaveReplay, recall, openHistory, removeHistory, TERMINAL };
 })(window.PP);
