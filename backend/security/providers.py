@@ -1,4 +1,4 @@
-"""Source-bound offline proposals and a deliberately disabled future LLM adapter."""
+"""Source-bound proposals; live generation needs explicit finding-level approval."""
 
 import ast
 from hashlib import sha256
@@ -54,7 +54,7 @@ class OfflineFixtureGenerator:
 
 
 class LLMFixGenerator:
-    """Schema/prompt boundary for LLMClient, without an enabled network path."""
+    """Shared schema/prompt boundary; no network authorization is implicit."""
 
     @staticmethod
     def build_request(finding: dict, redacted_source: str) -> dict:
@@ -80,15 +80,15 @@ class LLMFixGenerator:
         self.maximum, self.count = max_proposals, 0
         self.mode = session.mode if session else "disabled"
 
-    def generate(self, finding, source):
+    def generate(self, finding, source, *, previous=None, failures=None):
         from backend.ai.provider import ModelSession
         if not isinstance(self.session, ModelSession):
-            raise OfflineOnlyError("Security model generation requires an explicit bounded offline ModelSession; live is disabled.")
+            raise OfflineOnlyError("Security generation requires an explicit bounded ModelSession; live needs separate finding approval.")
         if self.rules and finding["scanner_test"] not in self.rules or self.scopes and finding.get("scope") not in self.scopes:
             return None
         if self.count >= self.maximum: return None
         self.count += 1
-        patch = self.session.request("security", finding["file"], source, finding=finding)
+        patch = self.session.request("security", finding["file"], source, finding=finding, previous=previous, failures=failures)
         return FixProposal(finding_id=finding["id"], explanation=patch.explanation, proposed_code=patch.proposed_code,
                            behavior_impact=patch.behavior_impact, confidence=patch.confidence, review_areas=patch.review_areas,
                            mode=self.mode)

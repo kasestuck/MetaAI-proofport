@@ -9,9 +9,17 @@ from pathlib import PurePosixPath
 import re
 
 from backend.ai.models import ModelPatch
-from backend.ai.prompts import PYTHON, PYTHON_REPAIR, PHP, PHP_MODULE, PHP_REPAIR, SECURITY, BOUNDARY
+from backend.ai.prompts import PYTHON, PYTHON_REPAIR, PHP, PHP_MODULE, PHP_REPAIR, SECURITY, SECURITY_EVAL, BOUNDARY
 from backend.llm.client import LLMClient, ModelUnavailable, _unique_json_keys, _invalid_json_constant
 from backend.llm.budget import LLMLimits
+
+
+def _validate_trial_limits(limits):
+    if (not isinstance(limits, LLMLimits) or limits.max_calls > 2
+            or limits.max_input_tokens > 9216 or limits.max_output_tokens > 3072
+            or limits.max_total_tokens > 24576 or limits.timeout_seconds > 30
+            or limits.max_cost_usd > Decimal("0.05")):
+        raise ModelUnavailable("Trial approval exceeds the two-call budget.", "live_not_authorized")
 
 
 @dataclass(frozen=True)
@@ -36,14 +44,26 @@ class PHPModuleLiveApproval:
     source_sha256: str
 
     def validate(self, client, language):
-        limits = client.limits
         if (language != "php" or self.file != "src/legacy.php"
-                or not re.fullmatch(r"[0-9a-f]{64}", self.source_sha256)
-                or not isinstance(limits, LLMLimits) or limits.max_calls > 2
-                or limits.max_input_tokens > 9216 or limits.max_output_tokens > 3072
-                or limits.max_total_tokens > 24576 or limits.timeout_seconds > 30
-                or limits.max_cost_usd > Decimal("0.05")):
+                or not re.fullmatch(r"[0-9a-f]{64}", self.source_sha256)):
             raise ModelUnavailable("PHP approval exceeds the single-module scope/budget.", "live_not_authorized")
+        _validate_trial_limits(client.limits)
+
+
+@dataclass(frozen=True)
+class SecurityLiveApproval:
+    """Future P8.4 approval for one eval finding; never permits migration."""
+    file: str
+    source_sha256: str
+    finding_id: str
+    runtime_version: str = "2.7"
+
+    def validate(self, client, language):
+        if (language != "python" or self.file != "legacy_shop/config.py" or self.runtime_version != "2.7"
+                or not re.fullmatch(r"[a-f0-9]{64}", self.source_sha256)
+                or not re.fullmatch(r"B307-[a-f0-9]{24}", self.finding_id)):
+            raise ModelUnavailable("Security approval scope differs from P8.4.", "live_not_authorized")
+        _validate_trial_limits(client.limits)
 
 
 class PrivateContext:
@@ -98,7 +118,7 @@ class ModelSession:
             raise ModelUnavailable("Supply an explicit LLMClient and supported language.")
         # P8 adds an explicit single-module operator approval after the real
         # smoke. No environment variable or public API request creates it.
-        if client.mode == "live" and isinstance(live_approval, (ModuleLiveApproval, PHPModuleLiveApproval)):
+        if client.mode == "live" and isinstance(live_approval, (ModuleLiveApproval, PHPModuleLiveApproval, SecurityLiveApproval)):
             live_approval.validate(client, language)
         elif client.mode not in {"mock", "replay"} or live_approval is not None:
             raise ModelUnavailable("AI pipeline live execution remains disabled pending real smoke and separate authorization.", "live_disabled")
@@ -131,16 +151,22 @@ class ModelSession:
                    "finding_id":finding["id"] if finding else None}
         if self.mode == "live":
             self.live_approval.validate(self.client, self.language)
-            if task != "translate" or file != self.live_approval.file or binding["source_sha256"] != self.live_approval.source_sha256:
+            security = isinstance(self.live_approval, SecurityLiveApproval)
+            if (task != ("security" if security else "translate") or file != self.live_approval.file
+                    or binding["source_sha256"] != self.live_approval.source_sha256
+                    or security and binding["finding_id"] != self.live_approval.finding_id):
                 raise ModelUnavailable("Request is outside the approved module binding.", "live_not_authorized")
         redacted = self.private.protect(source)
         context = {**binding, "source_version":"2.7" if self.language == "python" else "7.4", "target_version":"3.12" if self.language == "python" else "8.3",
                    "source":redacted, "previous": self.private.protect(previous) if previous else None,
                    "failures": self.private.clean(failures), "schema":ModelPatch.model_json_schema()}
+        if isinstance(self.live_approval, SecurityLiveApproval):
+            context["target_version"] = self.live_approval.runtime_version
         if finding:
             context["finding"] = self.private.clean({k:finding[k] for k in ("id","file","line","scope","scanner_test","cwe","severity","confidence","description") if k in finding})
         detailed_repair = task == "translate" and previous is not None and self.case_feedback
-        if task == "security": instructions = SECURITY
+        if task == "security":
+            instructions = SECURITY + (SECURITY_EVAL if finding.get("scanner_test") == "B307" and file == "legacy_shop/config.py" else "")
         elif self.language == "python": instructions = PYTHON_REPAIR if detailed_repair else PYTHON
         else: instructions = PHP_REPAIR if detailed_repair else PHP_MODULE if self.case_feedback else PHP
         system = instructions + "\n" + BOUNDARY

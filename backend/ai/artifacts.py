@@ -11,7 +11,11 @@ from backend.core.projects import linked
 
 def html(report):
     heading = "PHP baseline preparation; no model request" if report["phase"] == "preparation" else "PHP live module verification"
-    return '<!doctype html><meta charset="utf-8"><title>Proofport PHP verification</title><h1>' + heading + '</h1><pre>' + escape(json.dumps(report, sort_keys=True, indent=2)) + '</pre>'
+    title = "Proofport PHP verification"
+    if report.get("operation") == "security_fix":
+        title = "Proofport security verification"
+        heading = "Security baseline preparation; no model request" if report["phase"] == "preparation" else "Security proposal verification; inspect review decision"
+    return '<!doctype html><meta charset="utf-8"><title>' + title + '</title><h1>' + heading + '</h1><pre>' + escape(json.dumps(report, sort_keys=True, indent=2)) + '</pre>'
 
 
 def export(workspace, report, evidence, *, stem="report"):

@@ -1,4 +1,4 @@
-"""Transactional offline fixes, checked against real Docker behavior and scans."""
+"""Transactional fixes checked against Docker behavior and scans; live is opt-in."""
 
 import ast
 import base64
@@ -61,7 +61,14 @@ def _secret_values(source, findings):
 
 class SecurityFixEngine:
     def __init__(self, *, runner, working: Path, original: Path, original_hashes: dict,
-                 artifacts: Path, cases: list, golden: list, existing_tests: dict, evidence):
+                 artifacts: Path, cases: list, golden: list, existing_tests: dict, evidence,
+                 runtime_version="3.12", extra_syntax_versions=(), live_session=None):
+        images = {"2.7":"python:2.7", "3.12":"python:3.12-slim"}
+        if runtime_version not in images or not isinstance(extra_syntax_versions, tuple) or any(v not in images for v in extra_syntax_versions):
+            raise ValueError("Only explicitly checked Python runtimes are allowed")
+        self.runtime_version, self.runtime_image = runtime_version, images[runtime_version]
+        self.extra_syntax_images = tuple(images[v] for v in extra_syntax_versions)
+        self.live_session = live_session
         self.runner, self.working, self.original = runner, working.resolve(), original.resolve()
         self.artifacts = artifacts.resolve()
         if (self.working == self.original or self.working.is_relative_to(self.original)
@@ -103,14 +110,20 @@ class SecurityFixEngine:
 
     def _verify(self, project):
         checks = {}
-        compilation = invoke(self.runner, "python:3.12-slim", project, "compile", evidence=self.evidence)
+        compilation = invoke(self.runner, self.runtime_image, project, "compile", evidence=self.evidence)
         checks["syntax"] = {"ran": True, "passed": not compilation["errors"], "errors": compilation["errors"]}
+        for image in self.extra_syntax_images:
+            other = invoke(self.runner, image, project, "compile", evidence=self.evidence)
+            checks.setdefault("additional_syntax", []).append({"image":image,"passed":not other["errors"],"errors":other["errors"]})
+            if other["errors"]:
+                checks["syntax"]["passed"] = False
+                compilation["errors"].extend(other["errors"])
         if compilation["errors"]:
             for stage in ("golden", "existing_tests"):
                 checks[stage] = {"ran": False, "passed": False, "reason": "Syntax check failed; no dynamic results invented."}
             return checks
         try:
-            actual = invoke(self.runner, "python:3.12-slim", project, "cases", self.cases, self.evidence)["cases"]
+            actual = invoke(self.runner, self.runtime_image, project, "cases", self.cases, self.evidence)["cases"]
             comparisons = compare_cases(self.golden, actual)
             matched = sum(case["matches"] for case in comparisons)
             checks["golden"] = {"ran": True, "passed": matched == len(self.golden), "matched": matched,
@@ -118,7 +131,7 @@ class SecurityFixEngine:
         except Exception as exc:
             checks["golden"] = {"ran": True, "passed": False, "error_type": type(exc).__name__}
         try:
-            tests = invoke(self.runner, "python:3.12-slim", project, "tests", evidence=self.evidence)
+            tests = invoke(self.runner, self.runtime_image, project, "tests", evidence=self.evidence)
             ids = [test["id"] for test in tests["outcomes"]]
             expected = {test["id"] for test in self.existing["outcomes"]}
             passed = (tests["tests_run"] == self.existing["tests_run"] == len(ids) == len(set(ids))
@@ -133,12 +146,25 @@ class SecurityFixEngine:
         return all(checks[stage]["passed"] for stage in ("syntax", "golden", "existing_tests"))
 
     def _attempt(self, finding, proposal, current_scan):
-        if proposal.finding_id != finding["id"] or proposal.mode not in {"fixture", "mock", "replay"}:
-            raise ValueError("Only bound offline proposals for this finding are enabled; live is disabled.")
+        if proposal.finding_id != finding["id"] or proposal.mode not in {"fixture", "mock", "replay", "live"}:
+            raise ValueError("A bound proposal is required; live verification needs explicit finding approval.")
         current = project_hashes(self.working)
         target = checked_file(self.working, finding["file"])
         old_bytes = target.read_bytes()
         old = target.read_text(encoding="utf-8")
+        if proposal.mode == "live":
+            from backend.ai.provider import ModelSession, SecurityLiveApproval
+            session = self.live_session
+            if not isinstance(session, ModelSession) or session.mode != "live" or session.client.mode != "live" or not isinstance(session.live_approval, SecurityLiveApproval):
+                raise ValueError("Live verification needs the explicitly approved security session")
+            session.live_approval.validate(session.client, "python")
+            approval = session.live_approval
+            if (approval.runtime_version != self.runtime_version or approval.file != finding["file"]
+                    or approval.finding_id != finding["id"] or approval.source_sha256 != sha256(old.encode()).hexdigest()
+                    or not session.responses or session.responses[-1]["task"] != "security"
+                    or session.responses[-1]["finding_id"] != finding["id"]
+                    or session.responses[-1]["proposed_sha256"] != sha256(proposal.proposed_code.encode()).hexdigest()):
+                raise ValueError("Live proposal differs from approved/generated source binding")
         attempt_id = uuid4().hex
         folder = self.artifacts / attempt_id
         folder.mkdir()
@@ -148,13 +174,13 @@ class SecurityFixEngine:
         checked_file(staged, finding["file"]).write_text(new, encoding="utf-8")
         attempt = {
             "id": attempt_id, "finding_id": finding["id"], "file": finding["file"], "mode": proposal.mode,
-            "ai_generated": False, "explanation": proposal.explanation, "behavior_impact": proposal.behavior_impact,
+            "ai_generated": proposal.mode == "live", "explanation": proposal.explanation, "behavior_impact": proposal.behavior_impact,
             "confidence": proposal.confidence, "review_areas": proposal.review_areas,
             "source_sha256": sha256(old.encode()).hexdigest(), "proposed_sha256": sha256(new.encode()).hexdigest(),
             "diff": "".join(difflib.unified_diff(old.splitlines(keepends=True), new.splitlines(keepends=True), fromfile=finding["file"], tofile=finding["file"])),
             "status": "open", "applied": False, "rolled_back": False, "reasons": [],
         }
-        self.evidence.append("patch_applied", f"Staged offline {proposal.mode} attempt {attempt_id}; accepted copy is unchanged.", finding["file"])
+        self.evidence.append("patch_applied", f"Staged {proposal.mode} attempt {attempt_id}; accepted copy is unchanged.", finding["file"])
         try:
             checks = self._verify(staged)
             attempt["checks"] = checks
@@ -204,7 +230,7 @@ class SecurityFixEngine:
                 self.committed.setdefault(finding["file"], target.read_bytes())
                 _atomic_write(target, checked_file(staged, finding["file"]).read_bytes())
                 attempt.update(status="fixed", applied=True, reasons=["Exact supported constant-shell to argv transformation; real syntax, golden, existing tests, original hashes and rescan passed. This is verified hardening, not proof of a previously exploitable vulnerability."])
-                self.evidence.append("security_fix", f"Accepted offline {proposal.mode} candidate {attempt_id} for finding {finding['id']} after real checks.", finding["file"])
+                self.evidence.append("security_fix", f"Accepted {proposal.mode} candidate {attempt_id} for finding {finding['id']} after real checks.", finding["file"])
         except Exception as exc:
             if attempt["applied"]:
                 _atomic_write(target, old_bytes)
@@ -215,7 +241,7 @@ class SecurityFixEngine:
                 attempt["rolled_back"] = proposal.proposed_code is not None
                 if project_hashes(self.working) != current:
                     raise RuntimeError("Rejected attempt altered the accepted project.")
-                self.evidence.append("fix_reverted" if attempt["rolled_back"] else "security_finding", f"Offline attempt {attempt_id}: {attempt['status']}; no candidate changes accepted.", finding["file"])
+                self.evidence.append("fix_reverted" if attempt["rolled_back"] else "security_finding", f"{proposal.mode} attempt {attempt_id}: {attempt['status']}; no candidate changes accepted.", finding["file"])
             attempt["accepted_copy_unchanged"] = project_hashes(self.working) == current
             attempt["original_unchanged"] = self._original_ok()
             self._write(folder / "attempt.json", attempt)

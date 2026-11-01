@@ -1,6 +1,7 @@
 """One genuine PHP baseline, zero model requests; no translated fixture."""
 
 import json
+from uuid import uuid4
 import pytest
 
 from backend.ai import artifacts, first_php_live as php
@@ -17,7 +18,7 @@ def test_php_baseline(tmp_path,monkeypatch):
     monkeypatch.setattr(php,'ROOT',tmp_path)
     monkeypatch.setenv('LLM_MODE','live')
     env=tmp_path/'unit.env'
-    env.write_text('MODEL_API_KEY=unit-baseline-no-model\nLLM_MODE=live\nMODEL_NAME=muse-spark-1.3\nMODEL_BASE_URL=https://api.meta.ai/v1\nPRICE_IN_PER_MTOK=1.25\nPRICE_OUT_PER_MTOK=4.25\n')
+    env.write_text('MODEL_API_KEY=unit-only-'+uuid4().hex+'\nLLM_MODE=live\nMODEL_NAME=muse-spark-1.3\nMODEL_BASE_URL=https://api.meta.ai/v1\nPRICE_IN_PER_MTOK=1.25\nPRICE_OUT_PER_MTOK=4.25\n')
     before=source_hashes(php.SOURCE)
     report,workspace=php.prepare(env,runner=runner)
     assert report['status']=='awaiting_paid_approval' and report['model_calls']==0
