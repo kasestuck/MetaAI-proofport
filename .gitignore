@@ -1,0 +1,21 @@
+# Shared exclusions must protect a fresh clone, not only this user's Git config.
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+node_modules/
+/work/
+/.work/
+/backend/work/
+/backend/.work/
+/backend/.tmp/
+# Do not ignore source, tests, documentation, reviewed fixtures or evidence fixtures.

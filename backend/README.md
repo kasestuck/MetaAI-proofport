@@ -1,5 +1,17 @@
 # Proofport backend
 
+## Current release entry point (P10)
+
+Use the [root README](../README.md) and [release report](../docs/RELEASE_READINESS.md)
+for the current integrated Python/PHP application. Genuine scoped Meta migrations
+and a rejected real security proposal are documented in P82/P83/P84 result files.
+Explicit response replay is implemented internally; public live generation stays
+disabled. `python -m backend.release prepare-demo` exports checked saved evidence,
+not a new model run. API operation selection uses per-run UI controls.
+
+**The P0–P5 notes below are historical**, including their earlier unverified-model
+and unimplemented-replay statements. They are not current readiness claims.
+
 Python 3.12, FastAPI, Docker-only Python 2.7 to Python 3.12 verification.
 Endpoint paths and state fields follow the existing shared contract. Frontend
 is untouched. See `ARCHITECTURE.md` for the staged plan and historical audit.

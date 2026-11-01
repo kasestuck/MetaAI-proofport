@@ -1,5 +1,12 @@
 # P5.1: first Meta call readiness — 2026-11-01
 
+P10 status: this document records historical preparation. The separately approved
+smoke and genuine scoped P8.2/P8.3 migrations have since succeeded; P8.4's real
+security proposal was rejected. See the P82/P83/P84 result documents and the root
+README. The earlier “no genuine request” statements below describe P5.1/P7 at that
+time, not current evidence. Public API/UI live generation remains disabled; no
+historical consent authorizes another paid call.
+
 P7 update: [AI_PIPELINES.md](AI_PIPELINES.md) describes the new strict shared JSON
 ModelPatch boundary, language adapters and mock/replay security generators.
 The fenced-code/disabled-generator paragraphs below describe the preserved P5.1

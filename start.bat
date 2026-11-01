@@ -53,8 +53,8 @@ if errorlevel 1 (
 )
 if not defined PROOFPORT_PORT set "PROOFPORT_PORT=8000"
 echo Starting Proofport at http://127.0.0.1:%PROOFPORT_PORT% - press Ctrl+C to stop.
-echo Real verification requires Docker images and PROOFPORT_CASES_FILE.
-echo Live Meta requires key/model. Non-AI fixtures require explicit fixture mode.
+echo Choose Python/PHP operations in Run control; readiness checks local images and profiles.
+echo Offline fixtures are not AI migration. Saved real reports are replay, not new API calls.
 ".venv\Scripts\python.exe" -m backend.launcher
 set "PROOFPORT_EXIT=%errorlevel%"
 popd

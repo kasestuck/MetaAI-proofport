@@ -1,5 +1,14 @@
 # Architecture audit and staged implementation plan
 
+## P10 release preparation
+
+Current release instructions are in the root README and `docs/`. The integrated
+Python/PHP adapter/pipeline architecture is unchanged. `backend.release` adds
+read-only Git auditing and portable, sealed saved-real-run demo exports; it cannot
+make a model call, execute a project or publish anything. Display projections keep
+the original evidence chain and explicit historical provenance. See
+`docs/RELEASE_READINESS.md` for actual tests, publication gates and remaining risks.
+
 ## P7 structured model-response orchestration
 
 Both language adapters now expose an internal immutable AIJob/LLMClient entry
