@@ -1,5 +1,16 @@
 # Architecture audit and staged implementation plan
 
+## P4.1 per-run API control plane: 2026-11-01
+
+Added six additive `/api/v1` endpoints, immutable RunSpec, shared project policy,
+metadata-only capabilities, preflight with image/patch-version checks, instance-
+scoped idempotency and the same busy gate as legacy. Dispatch uses run settings,
+not mutable server defaults. Reports finalize before publishing terminal status.
+Live generation is blocked before SDK construction, including the legacy worker.
+The existing five endpoint contracts and frontend are retained. Legacy filesystem
+access is intentionally restricted; see API_CONTROL_PLANE.md for exact limits,
+supported operation pairs, contract examples and frontend integration steps.
+
 ## Offline P3 implementation: 2026-10-29
 
 Added a configured/available/verified Python runtime registry with explicit,

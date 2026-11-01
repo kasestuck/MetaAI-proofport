@@ -4,6 +4,15 @@ Python 3.12, FastAPI, Docker-only Python 2.7 to Python 3.12 verification.
 Endpoint paths and state fields follow the existing shared contract. Frontend
 is untouched. See `ARCHITECTURE.md` for the staged plan and historical audit.
 
+## Per-run API control plane (P4.1)
+
+The additive `/api/v1` API selects migration, audit or compatibility per run,
+with immutable parameters, project path policy, preflight and image readiness.
+Legacy endpoints remain. Live Meta stays disabled; no environment edits are
+needed for choosing offline operations. See [API_CONTROL_PLANE.md](API_CONTROL_PLANE.md)
+for requests, supported combinations, legacy path restrictions and Claude Code
+integration instructions. Frontend changes are a separate task.
+
 ## Offline universal Python workflows (P3)
 
 See [UNIVERSAL.md](UNIVERSAL.md) for the runtime registry, conservative version
