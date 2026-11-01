@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from backend.llm.client import LLMClient, ModelUnavailable
+from backend.llm.budget import LLMLimits
 
 
 def test_mock_is_offline_deterministic_and_free(tmp_path, monkeypatch):
@@ -44,20 +45,22 @@ def test_dotenv_sdk_settings_usage_and_env_override(tmp_path, monkeypatch):
 
     def complete(**kwargs):
         captured["request"] = kwargs
-        return SimpleNamespace(
-            choices=[SimpleNamespace(message=SimpleNamespace(content='{"ok":true}'))],
-            usage=SimpleNamespace(prompt_tokens=1000, completion_tokens=500),
+        response = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content='{"ok":true}'), finish_reason="stop")],
+            usage=SimpleNamespace(prompt_tokens=1000, completion_tokens=500, total_tokens=1500),
         )
+        return SimpleNamespace(parse=lambda: response, http_response=SimpleNamespace(json=lambda: {"usage": {
+            "prompt_tokens": 1000, "completion_tokens": 500, "total_tokens": 1500}}))
 
     def fake_sdk(**kwargs):
         captured["settings"] = kwargs
         return SimpleNamespace(
-            chat=SimpleNamespace(completions=SimpleNamespace(create=complete)),
+            chat=SimpleNamespace(completions=SimpleNamespace(with_raw_response=SimpleNamespace(create=complete))),
             close=lambda: captured.update(closed=True),
         )
 
     monkeypatch.setattr("backend.llm.client.OpenAI", fake_sdk)
-    with LLMClient(env) as client:
+    with LLMClient(env, allow_live=True, limits=LLMLimits(max_calls=2, max_output_tokens=512, max_total_tokens=5120, max_cost_usd="0.03")) as client:
         assert client.complete("system", "user", json_mode=True) == '{"ok":true}'
         client.complete("system", "second")
         assert client.calls[0].cost_usd == pytest.approx(0.006)
@@ -65,8 +68,10 @@ def test_dotenv_sdk_settings_usage_and_env_override(tmp_path, monkeypatch):
         assert (client.tokens_in, client.tokens_out) == (2000, 1000)
         assert "test-only-not-a-secret" not in json.dumps([asdict(c) for c in client.calls])
     assert captured["settings"]["base_url"] == "https://api.meta.ai/v1"
-    assert captured["settings"]["max_retries"] == 2
-    assert captured["settings"]["timeout"] == 30
+    assert captured["settings"]["max_retries"] == 0
+    assert captured["settings"]["timeout"] == 15
+    assert captured["settings"]["http_client"].follow_redirects is False
+    assert captured["settings"]["http_client"]._trust_env is False
     assert captured["request"]["model"] == "from-environment"
     assert captured["closed"] is True
 
@@ -83,15 +88,17 @@ def test_live_timeout_is_safe(tmp_path, monkeypatch):
     monkeypatch.setenv("LLM_MODE", "live")
     monkeypatch.setenv("MODEL_API_KEY", "test-only-not-a-secret")
     monkeypatch.setenv("MODEL_NAME", "test-model")
+    monkeypatch.setenv("PRICE_IN_PER_MTOK", "1.25")
+    monkeypatch.setenv("PRICE_OUT_PER_MTOK", "4.25")
 
     def timeout(**kwargs):
         raise APITimeoutError(request=SimpleNamespace())
 
     monkeypatch.setattr("backend.llm.client.OpenAI", lambda **kwargs: SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=timeout)), close=lambda: None,
+        chat=SimpleNamespace(completions=SimpleNamespace(with_raw_response=SimpleNamespace(create=timeout))), close=lambda: None,
     ))
-    with LLMClient(tmp_path / "absent.env") as client:
-        with pytest.raises(ModelUnavailable, match="bounded retries") as exc:
+    with LLMClient(tmp_path / "absent.env", allow_live=True, limits=LLMLimits()) as client:
+        with pytest.raises(ModelUnavailable, match="no automatic retry") as exc:
             client.complete("system", "user")
         assert "test-only-not-a-secret" not in str(exc.value)
         assert not client.calls
