@@ -1,5 +1,12 @@
 # P8.4 — first live security proposal preparation; separate paid consent pending
 
+Result update: [P84_SECURITY_LIVE_RESULT.md](P84_SECURITY_LIVE_RESULT.md) records
+the later separately authorized run: one genuine Meta request, estimated USD
+0.013249, 5/9 golden matches and a failing ConfigTests test. The proposal was
+rejected/rolled back, finding remains needs_review, and no vulnerability is
+claimed fixed. A second request was blocked locally by input_budget_exceeded.
+The preparation notes and their baseline receipts below remain unchanged.
+
 Branch: `integration/p4`. **Zero genuine Meta API requests, USD 0 spent in P8.4.**
 This milestone prepares generation and independent verification of one eval
 proposal. No AI security fix is claimed, no existing acceptance policy is loosened,
