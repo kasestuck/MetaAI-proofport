@@ -1,0 +1,37 @@
+{
+  "mode": "fixture",
+  "not_ai": true,
+  "proposals": [
+    {
+      "file": "src/commands.php",
+      "scanner_test": "PHP-CMD",
+      "scope": "constant_banner",
+      "source_sha256": "1553944d94626f26ac063fa0ca4646f7b6391bbf6ec554304a1866819a6b5947",
+      "proposed_code": "<?php\nnamespace ProofportPhpDemo;\n\nfunction constant_banner() {\n    $process = proc_open(['printf', 'proofport-safe'], [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['file', '/dev/null', 'w']], $pipes);\n    if (!is_resource($process)) throw new \\RuntimeException('command unavailable');\n    $output = stream_get_contents($pipes[1]); fclose($pipes[1]);\n    if (proc_close($process) !== 0) throw new \\RuntimeException('command failed');\n    return $output;\n}\n",
+      "behavior_impact": "preserves",
+      "policy": "constant_argv",
+      "explanation": "Authored fixture: replace one fixed shell printf command with literal argv, then verify outputs/tests."
+    },
+    {
+      "file": "src/security.php",
+      "scanner_test": "PHP-HASH",
+      "scope": "weak_password",
+      "source_sha256": "4417d97f4c480ddf7eed826076def46a13f1d45d44a0416ba56b8aaed591cd50",
+      "proposed_code": "<?php\nnamespace ProofportPhpDemo;\n\n// This connection is a string-returning test double, never a live database.\nclass DemoConnection { public function query($sql) { return $sql; } }\nfunction unsafe_query($input) { $db = new DemoConnection(); return $db->query('SELECT name FROM demo WHERE id=' . $input); }\nfunction unsafe_html($value) { echo $value; return null; }\nfunction unsafe_command($command) { return shell_exec($command); }\nfunction unsafe_decode($payload) { return unserialize($payload); }\nfunction unsafe_read($relative) { return file_get_contents(__DIR__ . '/../data/' . $relative); }\nfunction demo_secret() { $demo_secret = 'fixture-placeholder-not-a-real-secret'; return strlen($demo_secret); }\nfunction weak_password($password) { return hash('sha256', $password); }\nfunction unsafe_upload($source, $destination) { return move_uploaded_file($source, $destination); }\n",
+      "behavior_impact": "changes",
+      "review_areas": [
+        "crypto"
+      ],
+      "explanation": "Demonstrates rejection/review of a hash-format behavior change; not an accepted fix."
+    },
+    {
+      "file": "src/security.php",
+      "scanner_test": "PHP-SQL",
+      "scope": "unsafe_query",
+      "source_sha256": "4417d97f4c480ddf7eed826076def46a13f1d45d44a0416ba56b8aaed591cd50",
+      "proposed_code": "<?php\nnamespace ProofportPhpDemo;\n\n// This connection is a string-returning test double, never a live database.\nclass DemoConnection { public function query($sql) { return $sql; } }\nfunction unsafe_query($input) { $db = new DemoConnection(); return $db->query('SELECT name FROM demo WHERE id=' . $input); }\nfunction unsafe_html($value) { echo $value; return null; }\nfunction unsafe_command($command) { return shell_exec($command); }\nfunction unsafe_decode($payload) { return unserialize($payload); }\nfunction unsafe_read($relative) { return file_get_contents(__DIR__ . '/../data/' . $relative); }\nfunction demo_secret() { $demo_secret = 'fixture-placeholder-not-a-real-secret'; return strlen($demo_secret); }\nfunction weak_password($password) { return md5($password); }\nfunction unsafe_upload($source, $destination) { return move_uploaded_file($source, $destination); }\n\nfunction invalid_patch( {\n",
+      "behavior_impact": "unknown",
+      "explanation": "Deliberately invalid syntax fixture demonstrates rollback; not a real repair."
+    }
+  ]
+}

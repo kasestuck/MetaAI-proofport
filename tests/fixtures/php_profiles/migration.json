@@ -1,0 +1,11 @@
+{
+  "mode": "explicit_php_fixture_patches_not_ai",
+  "files": {
+    "src/legacy.php": {
+      "sha256": "f6389b36c56260eaf9167536d19eb3814de61daaddca0583b4c756167c590ae1",
+      "candidates": [
+        "<?php\nnamespace ProofportPhpDemo;\n\nfunction first_pair($items) { if (!$items) return false; $key = key($items); $value = current($items); return array(1 => $value, 'value' => $value, 0 => $key, 'key' => $key); }\nfunction first_character($text) { return $text[0]; }\n"
+      ]
+    }
+  }
+}

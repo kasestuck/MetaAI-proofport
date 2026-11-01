@@ -1,0 +1,210 @@
+{
+  "mode": "php_golden_inputs",
+  "allowed_differences": [
+    "deprecation_notices"
+  ],
+  "cases": [
+    {
+      "id": "pair-map",
+      "file": "src/legacy.php",
+      "call": "ProofportPhpDemo\\first_pair",
+      "args": [
+        {
+          "a": 3,
+          "b": 4
+        }
+      ],
+      "expected_status": "return"
+    },
+    {
+      "id": "pair-empty",
+      "file": "src/legacy.php",
+      "call": "ProofportPhpDemo\\first_pair",
+      "args": [
+        []
+      ],
+      "expected_status": "return"
+    },
+    {
+      "id": "pair-list",
+      "file": "src/legacy.php",
+      "call": "ProofportPhpDemo\\first_pair",
+      "args": [
+        [
+          2,
+          5
+        ]
+      ],
+      "expected_status": "return"
+    },
+    {
+      "id": "character",
+      "file": "src/legacy.php",
+      "call": "ProofportPhpDemo\\first_character",
+      "args": [
+        "safe"
+      ],
+      "expected_status": "return"
+    },
+    {
+      "id": "character-digit",
+      "file": "src/legacy.php",
+      "call": "ProofportPhpDemo\\first_character",
+      "args": [
+        "123"
+      ],
+      "expected_status": "return"
+    },
+    {
+      "id": "sum",
+      "file": "src/math.php",
+      "call": "ProofportPhpDemo\\total",
+      "args": [
+        [
+          1,
+          2,
+          3
+        ]
+      ],
+      "expected_status": "return"
+    },
+    {
+      "id": "sum-empty",
+      "file": "src/math.php",
+      "call": "ProofportPhpDemo\\total",
+      "args": [
+        []
+      ],
+      "expected_status": "return"
+    },
+    {
+      "id": "sum-error",
+      "file": "src/math.php",
+      "call": "ProofportPhpDemo\\total",
+      "args": [
+        [
+          -1
+        ]
+      ],
+      "expected_status": "exception"
+    },
+    {
+      "id": "division",
+      "file": "src/math.php",
+      "call": "ProofportPhpDemo\\quotient",
+      "args": [
+        5,
+        2
+      ],
+      "expected_status": "return"
+    },
+    {
+      "id": "stdout",
+      "file": "src/math.php",
+      "call": "ProofportPhpDemo\\labeled",
+      "args": [
+        "safe"
+      ],
+      "expected_status": "return"
+    },
+    {
+      "id": "binary",
+      "file": "src/math.php",
+      "call": "ProofportPhpDemo\\binary_label",
+      "args": [],
+      "expected_status": "return"
+    },
+    {
+      "id": "runtime-error",
+      "file": "src/math.php",
+      "call": "ProofportPhpDemo\\runtime_failure",
+      "args": [],
+      "expected_status": "runtime_error"
+    },
+    {
+      "id": "warning",
+      "file": "src/math.php",
+      "call": "ProofportPhpDemo\\warning_example",
+      "args": [],
+      "expected_status": "return"
+    },
+    {
+      "id": "query",
+      "file": "src/security.php",
+      "call": "ProofportPhpDemo\\unsafe_query",
+      "args": [
+        "7"
+      ],
+      "expected_status": "return"
+    },
+    {
+      "id": "html",
+      "file": "src/security.php",
+      "call": "ProofportPhpDemo\\unsafe_html",
+      "args": [
+        "safe text"
+      ],
+      "expected_status": "return"
+    },
+    {
+      "id": "command",
+      "file": "src/security.php",
+      "call": "ProofportPhpDemo\\unsafe_command",
+      "args": [
+        "printf proofport-demo"
+      ],
+      "expected_status": "return"
+    },
+    {
+      "id": "decode",
+      "file": "src/security.php",
+      "call": "ProofportPhpDemo\\unsafe_decode",
+      "args": [
+        "i:7;"
+      ],
+      "expected_status": "return"
+    },
+    {
+      "id": "file-read",
+      "file": "src/security.php",
+      "call": "ProofportPhpDemo\\unsafe_read",
+      "args": [
+        "hello.txt"
+      ],
+      "expected_status": "return"
+    },
+    {
+      "id": "placeholder-length",
+      "file": "src/security.php",
+      "call": "ProofportPhpDemo\\demo_secret",
+      "args": [],
+      "expected_status": "return"
+    },
+    {
+      "id": "password-hash",
+      "file": "src/security.php",
+      "call": "ProofportPhpDemo\\weak_password",
+      "args": [
+        "demo"
+      ],
+      "expected_status": "return"
+    },
+    {
+      "id": "no-upload",
+      "file": "src/security.php",
+      "call": "ProofportPhpDemo\\unsafe_upload",
+      "args": [
+        "not-an-upload",
+        "/tmp/proofport-no-upload"
+      ],
+      "expected_status": "return"
+    },
+    {
+      "id": "constant-command",
+      "file": "src/commands.php",
+      "call": "ProofportPhpDemo\\constant_banner",
+      "args": [],
+      "expected_status": "return"
+    }
+  ]
+}
