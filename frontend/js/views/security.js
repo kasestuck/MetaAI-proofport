@@ -58,6 +58,9 @@
   function contextNote(run) {
     const p = L.provenance(run);
     if (!p) return null;
+    const historic = run.report && run.report.verification && run.report.verification.historical;
+    if (historic && historic.security_scanned === false) return h("div", { class: "callout" },
+      "No security scan was part of this saved module migration. Zero findings mean not scanned, not secure.");
     if (L.language(run) === "php") return h("div", { class: "callout" }, icon("info", "icon-inline"), " ",
       p.id === "compatibility" ? "PHP compatibility does not run a security audit. Zero findings mean not scanned."
         : "Limited PHP lexical rules; no Bandit or complete data-flow coverage. Findings are potential risks, not confirmed exploits. Fixture hardening is not AI remediation.");
@@ -197,7 +200,7 @@
     const php = L.language(run) === "php";
     const original = fix.original_unchanged !== undefined ? fix.original_unchanged : fix.source_unchanged;
     const status = php ? fix.verified === true ? "Accepted copy verified" : "Not verified" : "Status: " + (fix.status || "unknown");
-    return card({ title: "Security Fix Engine", sub: "Finding → offline proposal → staged copy → syntax → golden → existing tests → " + (php ? "PHP" : "Bandit") + " rescan → policy decision",
+    return card({ title: "Security Fix Engine", sub: "Finding → " + (fix.ai_generated ? "recorded Meta proposal" : "offline proposal") + " → staged copy → syntax → golden → existing tests → " + (php ? "PHP" : "Bandit") + " rescan → policy decision",
       actions: [badge(fix.ai_generated ? "AI generated" : "Offline fixture · not AI", fix.ai_generated ? "info" : "muted"), badge(status, php ? fix.verified === true ? "ok" : "muted" : fix.status === "verified" ? "ok" : "err")] },
     h("div", { class: "stack" },
       h("div", { class: "grid grid-4" },

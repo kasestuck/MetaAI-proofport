@@ -1,5 +1,11 @@
 # Proofport Console — Python / PHP
 
+P10 adds truthful saved-real-run labels and display projections for the retained
+Python/PHP migrations and rejected Meta security proposal. Use the root README
+and `docs/DEMO_RUNBOOK.md`. These imports create no operation or model call.
+`frontend/tests/release.browser.cjs` checks all five sections at desktop/mobile
+widths without screenshots. The existing visual design and API controls remain.
+
 P6.5 now adds language selection and verified PHP migration/audit/compatibility
 controls on `integration/p4`. Read [PHP_INTEGRATION.md](PHP_INTEGRATION.md) for
 the current operation policies, profiles, actual browser/test results and manual

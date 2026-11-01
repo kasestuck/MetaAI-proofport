@@ -140,7 +140,7 @@
       case "mock":
         return { id: "mock", label: "Mock", tone: "warn", desc: "No Meta AI calls are made. Mock responses are not translations." };
       case "replay":
-        return { id: "replay", label: "Replay", tone: "muted", desc: "LLM_MODE=replay is configured, but backend replay is not implemented." };
+        return { id: "replay", label: "Replay", tone: "muted", desc: "Replay is configured. Explicit prompt-bound recordings are supported internally; configuration does not prove model usage or enable public live generation." };
       default:
         return { id: null, label: "Unknown", tone: "muted", desc: "LLM mode unknown (backend not reachable)." };
     }
@@ -185,6 +185,21 @@
     if (!run) return null;
     const replayPrefix = run.origin === "replay" ? "Saved report · " : "";
     const report = run.report;
+    const saved = report && report.verification;
+    const historic = saved && saved.historical;
+    if (run.origin === "replay" && historic && historic.format === "proofport_saved_live_projection_v1"
+        && historic.new_api_calls === 0 && /^[a-f0-9]{64}$/.test(historic.source_report_sha256 || "")) {
+      const s = report.state || {};
+      const intact = s.chain_intact === true && s.hashes && s.hashes.unchanged === true
+        && run.chain && run.chain.status === "ok";
+      const migration = saved.ai_migration === true && saved.model_calls > 0 && s.status === "done" && intact;
+      const review = historic.kind === "security" && saved.model_calls > 0 && s.status === "failed"
+        && saved.security_fix && saved.security_fix.status === "needs_review" && intact;
+      return { id: "historical_live", source: "report", simulated: false, tone: migration ? "ok" : "warn",
+        label: migration ? "Saved real Meta run · " + languageName(language(run)) + " verified scope"
+          : review ? "Saved real Meta proposal · rejected / needs review" : "Saved Meta record · not verified",
+        desc: "Historical recorded results, not a new live run. No API call is made by replay. Inspect the original report and pack manifest; local hashes are not an external signature." };
+    }
     if (language(run) === "php") {
       const v = report && report.verification || {};
       const p = parameters(run);

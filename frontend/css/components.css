@@ -22,7 +22,7 @@
   min-width: 0;
 }
 .card-flush { padding: 0; overflow: hidden; }
-.card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.card-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-4); }
 .card-flush > .card-head { padding: var(--sp-5) var(--sp-5) 0; }
 .card-title { font-size: var(--fs-md); font-weight: 600; }
 .card-sub { font-size: var(--fs-sm); color: var(--text-2); margin-top: 2px; }
