@@ -9,7 +9,7 @@ from pathlib import PurePosixPath
 import re
 
 from backend.ai.models import ModelPatch
-from backend.ai.prompts import PYTHON, PYTHON_REPAIR, PHP, SECURITY, BOUNDARY
+from backend.ai.prompts import PYTHON, PYTHON_REPAIR, PHP, PHP_MODULE, PHP_REPAIR, SECURITY, BOUNDARY
 from backend.llm.client import LLMClient, ModelUnavailable, _unique_json_keys, _invalid_json_constant
 from backend.llm.budget import LLMLimits
 
@@ -27,6 +27,23 @@ class ModuleLiveApproval:
                 or not isinstance(limits, LLMLimits) or limits.max_calls > 3
                 or limits.max_cost_usd > Decimal("0.05")):
             raise ModelUnavailable("Live approval exceeds the first-module scope/budget.", "live_not_authorized")
+
+
+@dataclass(frozen=True)
+class PHPModuleLiveApproval:
+    """Explicit future operator approval, bound to the one P8.3 PHP module."""
+    file: str
+    source_sha256: str
+
+    def validate(self, client, language):
+        limits = client.limits
+        if (language != "php" or self.file != "src/legacy.php"
+                or not re.fullmatch(r"[0-9a-f]{64}", self.source_sha256)
+                or not isinstance(limits, LLMLimits) or limits.max_calls > 2
+                or limits.max_input_tokens > 9216 or limits.max_output_tokens > 3072
+                or limits.max_total_tokens > 24576 or limits.timeout_seconds > 30
+                or limits.max_cost_usd > Decimal("0.05")):
+            raise ModelUnavailable("PHP approval exceeds the single-module scope/budget.", "live_not_authorized")
 
 
 class PrivateContext:
@@ -81,7 +98,7 @@ class ModelSession:
             raise ModelUnavailable("Supply an explicit LLMClient and supported language.")
         # P8 adds an explicit single-module operator approval after the real
         # smoke. No environment variable or public API request creates it.
-        if client.mode == "live" and isinstance(live_approval, ModuleLiveApproval):
+        if client.mode == "live" and isinstance(live_approval, (ModuleLiveApproval, PHPModuleLiveApproval)):
             live_approval.validate(client, language)
         elif client.mode not in {"mock", "replay"} or live_approval is not None:
             raise ModelUnavailable("AI pipeline live execution remains disabled pending real smoke and separate authorization.", "live_disabled")
@@ -94,8 +111,8 @@ class ModelSession:
         self.responses = []
         self.live_approval = live_approval
         self.response_dir = response_dir
-        if type(case_feedback) is not bool or (case_feedback and language != "python"):
-            raise ModelUnavailable("Detailed case feedback is restricted to explicit Python repair.", "model_context_invalid")
+        if type(case_feedback) is not bool:
+            raise ModelUnavailable("Detailed case feedback needs an explicit boolean opt-in.", "model_context_invalid")
         self.case_feedback = case_feedback
 
     def request(self, task, file, source, *, previous=None, failures=None, finding=None):
@@ -123,7 +140,10 @@ class ModelSession:
         if finding:
             context["finding"] = self.private.clean({k:finding[k] for k in ("id","file","line","scope","scanner_test","cwe","severity","confidence","description") if k in finding})
         detailed_repair = task == "translate" and previous is not None and self.case_feedback
-        system = (SECURITY if task == "security" else PYTHON_REPAIR if detailed_repair else PYTHON if self.language == "python" else PHP) + "\n" + BOUNDARY
+        if task == "security": instructions = SECURITY
+        elif self.language == "python": instructions = PYTHON_REPAIR if detailed_repair else PYTHON
+        else: instructions = PHP_REPAIR if detailed_repair else PHP_MODULE if self.case_feedback else PHP
+        system = instructions + "\n" + BOUNDARY
         count = len(self.client.attempts)
         try:
             text = self.client.complete(system, json.dumps(context, sort_keys=True, ensure_ascii=True), json_mode=True)

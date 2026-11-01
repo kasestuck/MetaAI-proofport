@@ -23,6 +23,19 @@ PHP = """Migrate PHP 7.4 to PHP 8.3. Preserve public APIs, array key types and o
 coercion, strings/bytes, exception classes, warnings, output and data formats.
 Do not fix security issues during translation. Return the complete single file.
 Never modify tests, install dependencies, invoke tools or claim checks ran."""
+PHP_MODULE = PHP + """
+This job changes only src/legacy.php in the original php_shop demo.
+PHP 8 removed each() and curly-brace string offsets. Preserve the actual each()
+return shape and insertion order of mixed numeric/string keys, false for empty
+arrays, byte-string offset behavior, namespace and public signatures. Do not
+change other files or fix security findings. Return complete ModelPatch JSON
+with concise explanation, no reasoning transcript, fences or partial code."""
+PHP_REPAIR = PHP_MODULE + """
+Repair the previous candidate using the original source and observed failing
+calls/arguments and typed expected/actual results. Preserve ordered PHP arrays,
+key/value types, binary strings, errors and output. Only the explicitly recorded
+allowed_differences may vary; deprecation removal is not permission to suppress
+other warnings. Do not hardcode case answers, weaken tests or claim checks ran."""
 SECURITY = """Propose a minimal single-file security patch for the supplied finding.
 The warning is a potential risk, not a confirmed exploit. Preserve unrelated code.
 Explain behavior, API, configuration, crypto and data-format impacts honestly.
