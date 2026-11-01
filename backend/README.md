@@ -73,29 +73,25 @@ review rather than being silently applied.
 at `http://127.0.0.1:8000`, and opens the browser after readiness. Ctrl+C stops
 it. Set `PROOFPORT_PORT=8001` if needed. API docs: `/docs`.
 
-## Live Meta migration
+## Meta live readiness (P5.1)
 
-Create an untracked `.env` in the repo root with genuine provider settings:
+Live migration and AI Security Fix remain disabled. The standalone
+client now needs explicit authorization/limits, sends no automatic retries, and
+has a separate one-request smoke with an offline default. Follow
+[META_LIVE_READINESS.md](META_LIVE_READINESS.md) for current credential, budget,
+error-handling and first-call instructions. No actual Meta request has been
+verified. No `.env` setting alone enables the control-plane/worker live gates.
 
-```dotenv
-PROOFPORT_PIPELINE=verify
-PROOFPORT_CASES_FILE=tests/fixtures/legacy_shop/cases.json
-LLM_MODE=live
-MODEL_API_KEY=your-private-key
-MODEL_NAME=your-provisioned-model
-MODEL_BASE_URL=https://api.meta.ai/v1
-PRICE_IN_PER_MTOK=1.25
-PRICE_OUT_PER_MTOK=4.25
-SANDBOX_TIMEOUT_SECONDS=30
+An offline preview, safe even when credentials are configured:
+
+```powershell
+.venv/Scripts/python.exe -m backend.llm.smoke
 ```
 
-Environment variables override `.env`; clear fixture-mode terminal settings
-before switching to live mode. Missing credentials produce `model_unavailable`,
-even after successful golden recording. There is no automatic fixture fallback.
-The SDK uses a 30-second request timeout and at most two retries. The live
-translate/fix path is connected but no actual Meta request has been validated
-here: the key/model are not configured. Health reports configuration, not
-provider access. Replay is still unimplemented and cannot count as model use.
+The separate executed smoke requires explicit paid-call acknowledgment, a
+dollar cap and verified model pricing. It sends only synthetic connectivity
+input, not project sources. Health reports configuration, not provider access.
+Replay remains unimplemented and cannot count as model use.
 
 Without explicit golden inputs or working Docker, requests only inventory/hash
 sources and fail without fictional successes. `PROOFPORT_PIPELINE=simulation`
