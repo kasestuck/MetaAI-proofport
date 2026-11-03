@@ -271,4 +271,5 @@ dependencies, Docker Desktop or Meta services.
 
 [Three-minute demo script](docs/DEMO_SCRIPT.md) ·
 [Submission checklist](docs/SUBMISSION_CHECKLIST.md) ·
-[Release readiness and blockers](docs/RELEASE_READINESS.md)
+[P12 publication verification and safe main integration](docs/P12_PUBLICATION.md) ·
+[Earlier release readiness](docs/RELEASE_READINESS.md)

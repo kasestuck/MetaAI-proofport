@@ -1,6 +1,6 @@
 # Hackathon submission checklist
 
-Prepared **November 2, 2026**. Submission is **not complete**. This file creates
+Updated **November 3, 2026** for P12. Submission is **not complete**. This file creates
 no account, public link, upload, push or submission.
 
 ## Sources and certainty
@@ -33,11 +33,14 @@ and submit early. No reminder or submission automation was created.
 
 - [ ] **Public GitHub / judge access.** Configured repository:
   `https://github.com/kasestuck/MetaAI-proofport`. Anonymous GitHub REST returned
-  **404** during P10. It may be private, absent or inaccessible; public access
-  cannot be claimed. The connector also could not see it. The owner must review
+  **404** again during P12. Authenticated Git reads succeed, so the repository
+  exists, but public access cannot be claimed. The connector also could not see
+  it. The owner must review
   and publish the intended release snapshot, then test signed out.
-- [ ] **Correct code revision published.** P10 commits are local on `integration/p4`.
-  No merge/rebase/push was performed. Confirm the published branch/link contains
+- [ ] **Correct code revision published.** The assembled P11/P12 release is local
+  on `release/hackathon`; backend/frontend/integration history is included.
+  P12 performs no merge/rebase/push. Follow [publication verification](P12_PUBLICATION.md).
+  Confirm the published branch/link contains
   the reviewed frontend/backend, README and license; an old default branch is not enough.
 - [x] **English README drafted**, including architecture, Windows/Docker setup,
   actual results, limitations, security, Meta integration and AI disclosure.
@@ -70,6 +73,9 @@ and submit early. No reminder or submission automation was created.
 
 ## Before publishing
 
+- [x] **Previously disclosed Meta key revoked**, confirmed by the owner during
+  P12. No new key is needed to publish or run the offline judge suite. Revocation
+  does not itself remove historical bytes; retain the scoped Git audit below.
 - [ ] Inspect the final local commit range and run `python -m backend.release audit`.
 - [ ] Check README links, selected branch, MIT/third-party notices and `.gitignore`.
 - [ ] Keep `.env`, `.venv`, caches, generated candidates/reports and private keys out
