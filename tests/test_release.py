@@ -70,3 +70,41 @@ def test_pack_manifest_cannot_hide_changed_bytes_or_extra_files(tmp_path):
 def test_pack_manifest_size_is_bounded_before_parsing(tmp_path):
     (tmp_path/'manifest.json').write_bytes(b' '*2_000_001)
     with pytest.raises(ValueError,match='size bound'): release.verify_demo(tmp_path)
+
+
+def test_full_git_audit_finds_retired_key_in_unreachable_commit_without_printing_it(tmp_path):
+    import subprocess
+    import base64
+    from uuid import uuid4
+    from backend import release
+    subprocess.run(['git','init','-q',str(tmp_path)],check=True)
+    (tmp_path/'.gitignore').write_text('backend/.tmp/\n')
+    private=tmp_path/'backend/.tmp/retired-keys.env';private.parent.mkdir(parents=True)
+    key='unit-disclosed-'+uuid4().hex
+    private.write_text('MODEL_API_KEY_RETIRED_1='+key+'\n')
+    tree=release.git(tmp_path,'mktree',input=b'').strip()
+    content=b'tree '+tree+b'\nauthor Unit <unit@example.invalid> 1 +0000\ncommitter Unit <unit@example.invalid> 1 +0000\n\n'+key.encode()+b'\n'
+    release.git(tmp_path,'hash-object','-w','-t','commit','--stdin',input=content)
+    release.git(tmp_path,'hash-object','-w','--stdin',input=base64.b64encode(key.encode()))
+    report=release.audit(tmp_path,retired_keys_file=private)
+    assert report['historical_credential_hits']==2 and report['includes_unreachable_objects']
+    assert not report['technical_checks_passed'] and key not in json.dumps(report)
+
+
+def test_retired_key_file_cannot_be_a_tracked_or_external_file(tmp_path):
+    import subprocess
+    from backend import release
+    subprocess.run(['git','init','-q',str(tmp_path)],check=True)
+    outside=tmp_path/'retired.env';outside.write_text('MODEL_API_KEY_RETIRED_1=unit-only\n')
+    with pytest.raises(ValueError): release.credential_forms(tmp_path,outside)
+
+
+def test_missing_or_empty_retired_key_file_cannot_claim_coverage(tmp_path):
+    import subprocess
+    from backend import release
+    subprocess.run(['git','init','-q',str(tmp_path)],check=True)
+    (tmp_path/'.gitignore').write_text('backend/.tmp/\n')
+    private=tmp_path/'backend/.tmp/retired-keys.env';private.parent.mkdir(parents=True)
+    with pytest.raises(ValueError): release.credential_forms(tmp_path,private)
+    private.write_text('MODEL_API_KEY_RETIRED_1=\n')
+    with pytest.raises(ValueError): release.credential_forms(tmp_path,private)

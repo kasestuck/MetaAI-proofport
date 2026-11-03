@@ -34,8 +34,26 @@ TOKEN_PATTERN=re.compile(rb'(?<![A-Za-z0-9])(?:gh[pousr]_[A-Za-z0-9]{30,}|AKIA[0
 def digest(path): return sha256(path.read_bytes()).hexdigest()
 
 
-def credential_forms(root):
-    values=[dotenv_values(root/p).get('MODEL_API_KEY') for p in ('.env','backend/.tmp/meta-smoke.env')]
+def credential_forms(root,retired_keys_file=None):
+    paths=[root/'.env',*sorted((root/'backend/.tmp').glob('meta*env*'))]
+    if retired_keys_file:
+        selected=Path(retired_keys_file)
+        selected=selected if selected.is_absolute() else root/selected
+        if not selected.is_file(): raise ValueError('Requested retired-key file is missing')
+        if not selected.resolve().is_relative_to((root/'backend/.tmp').resolve()) or any(linked(p) for p in (selected,*selected.parents)):
+            raise ValueError('Retired keys must stay in ignored private backend/.tmp configuration')
+        relative=selected.relative_to(root).as_posix()
+        if git(root,'ls-files','--',relative).strip(): raise ValueError('Private key file must never be tracked')
+        ignored=subprocess.run(['git','-C',str(root),'check-ignore','-q','--',relative]).returncode==0
+        if not ignored: raise ValueError('Private key file must be ignored')
+        if not any(v for k,v in dotenv_values(selected).items() if re.fullmatch(r'MODEL_API_KEY(?:_[A-Z0-9_]+)?',k)):
+            raise ValueError('Requested retired-key file contains no key values')
+        paths.append(selected)
+    values=[]
+    for path in set(paths):
+        if path.is_file():
+            if path.stat().st_size>65536 or any(linked(p) for p in (path,*path.parents)): raise ValueError('Unsafe private key configuration')
+            values.extend(value for name,value in dotenv_values(path).items() if re.fullmatch(r'MODEL_API_KEY(?:_[A-Z0-9_]+)?',name))
     return {form for value in values if value for form in (value.encode(),base64.b64encode(value.encode()),json.dumps(value)[1:-1].encode())}
 
 
@@ -171,37 +189,45 @@ def git(root,*args,input=None):
     return subprocess.run(['git','-C',str(root),*args],input=input,capture_output=True,check=True).stdout
 
 
-def audit(root=ROOT):
+def audit(root=ROOT,*,retired_keys_file=None):
     tracked=[p for p in git(root,'ls-files','-z').decode().split('\0') if p]
     generated=[p for p in tracked if set(Path(p).parts)&{'.work','.tmp','.venv','venv','__pycache__','.pytest_cache','node_modules','work'} or p.endswith(('.pyc','.pyo'))]
     envs=[p for p in tracked if Path(p).name=='.env' or Path(p).name.endswith('.env') or Path(p).name.startswith('.env.') and Path(p).name!='.env.example']
-    forms=credential_forms(root)
-    ids=[line.split(b' ')[0] for line in git(root,'rev-list','--objects','--all').splitlines()]
-    metadata=git(root,'cat-file','--batch-check=%(objectname) %(objecttype) %(objectsize)',input=b'\n'.join(ids)+b'\n')
-    blobs=[row.split()[0] for row in metadata.splitlines() if row.split()[1]==b'blob']
-    sizes=[int(row.split()[2]) for row in metadata.splitlines() if row.split()[1]==b'blob']
+    forms=credential_forms(root,retired_keys_file)
+    metadata=git(root,'cat-file','--batch-all-objects','--batch-check=%(objectname) %(objecttype) %(objectsize)')
+    rows=[row.split() for row in metadata.splitlines()]
+    ids=[row[0] for row in rows];sizes=[int(row[2]) for row in rows]
     if sum(sizes)>100_000_000: raise ValueError('History scan exceeds bounded audit size; manual review required')
-    stream=git(root,'cat-file','--batch',input=b'\n'.join(blobs)+b'\n');cursor=0;hits=0
-    for _ in blobs:
+    stream=git(root,'cat-file','--batch',input=b'\n'.join(ids)+b'\n') if ids else b'';cursor=0;hits=potential=0
+    assignment=re.compile(rb'\bMODEL_API_KEY(?:_[A-Z0-9_]+)?\s*=\s*[\x22\x27]?([A-Za-z0-9_-]{24,})')
+    for _ in ids:
         end=stream.index(b'\n',cursor);size=int(stream[cursor:end].split()[2]);start=end+1
-        hits+=not secret_free(stream[start:start+size],forms);cursor=start+size+1
+        content=stream[start:start+size]
+        hits+=not secret_free(content,forms);cursor=start+size+1
+        for match in assignment.finditer(content):
+            if not any(marker in match.group(1).lower() for marker in (b'unit',b'test',b'fixture',b'fake',b'mock',b'example',b'placeholder',b'dummy',b'replay')): potential+=1
     current_hits=sum(not secret_free((root/p).read_bytes(),forms) for p in tracked if (root/p).is_file())
     required=['README.md','AGENTS.md','LICENSE','SECURITY.md','THIRD_PARTY_NOTICES.md','.gitignore','pytest.ini','.env.example']
     missing=[p for p in required if not (root/p).is_file()]
     return {'branch':git(root,'branch','--show-current').decode().strip(),'working_tree_clean':not git(root,'status','--porcelain').strip(),'tracked_files':len(tracked),
-        'history_blobs_checked':len(blobs),'known_credential_checked':bool(forms),'credential_scope':'Known local key/JSON/base64 and common token prefixes; not exhaustive secret discovery.',
+        'history_blobs_checked':sum(row[1]==b'blob' for row in rows),'all_git_objects_checked':len(rows),'includes_unreachable_objects':True,
+        'known_credential_checked':bool(forms),'retired_keys_file_supplied':bool(retired_keys_file),
+        'credential_scope':'Available local key copies/JSON/base64, common token prefixes and long key assignments, in all objects including commit/tag/tree data. Unknown retired key values cannot be exact-matched; not exhaustive secret discovery.',
         'historical_credential_hits':hits,'current_credential_hits':current_hits,'tracked_generated_files':generated,
+        'unreviewed_long_key_assignments':potential,
         'tracked_private_env_files':envs,'missing_release_files':missing,
-        'technical_checks_passed':not any((hits,current_hits,generated,envs,missing)),
+        'technical_checks_passed':not any((hits,potential,current_hits,generated,envs,missing)),
         'scope':'Local Git/file checks only; public access, video, team, organizer rules and submission are separate manual gates.'}
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('operation',choices=('audit','prepare-demo','verify-demo'));parser.add_argument('--pack',type=Path)
+    parser.add_argument('--retired-keys-file',type=Path,help='Ignored backend/.tmp env file; MODEL_API_KEY_RETIRED_1=...; never paste real keys in commands')
     args=parser.parse_args()
     try:
         if args.operation=='audit':
-            result=audit();print(json.dumps(result,indent=2));return int(not result['technical_checks_passed'])
+            result=audit(retired_keys_file=args.retired_keys_file);print(json.dumps(result,indent=2));return int(not result['technical_checks_passed'])
+        if args.retired_keys_file: raise ValueError('Retired key configuration applies only to audit')
         if args.operation=='prepare-demo':
             if args.pack: raise ValueError('Prepare always creates a new ignored workspace')
             output=prepare_demo();print(json.dumps({'pack':str(output),'zip':str(output)+'.zip','new_api_calls':0}));return 0
