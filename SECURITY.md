@@ -30,8 +30,10 @@ cannot supply Docker commands or mount options. Remote hosting is unsupported.
 
 ## Models, secrets and exports
 
-Public API/UI live generation stays disabled. Live CLI jobs require separate
-consent and bounded budgets; API errors/timeouts stop without paid retries.
+Generic API/UI live generation stays disabled. The two fixed P13 Dashboard
+demos additionally require an isolated new key, local operator permission and
+expiring per-run paid UI consent. Live CLI jobs also require separate consent
+and bounded budgets; API errors/timeouts stop without paid retries.
 Offline fixtures and saved real runs are explicitly labelled.
 
 Keep keys in ignored private configuration, never browser forms, recordings,

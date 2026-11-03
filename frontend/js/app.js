@@ -101,11 +101,12 @@
     const health = state.health.data;
     let active = null;
     if (run && run.origin === "replay") active = "replay";
+    else if (run && run.control && run.control.execution.live_enabled) active = "live";
     else if (state.control.mode === "v1") active = "mock";
     else if (state.control.mode === "legacy" && health && health.llm_mode !== "live") active = health.llm_mode;
     const llm = L.llmMode(health && health.llm_mode);
     const titles = {
-      live: "Live Meta AI is disabled by the control plane. Health configuration does not authorize paid calls.",
+      live: "Only separately approved fixed-module live demos. See actual run checks and cost; health settings alone do not authorize paid calls.",
       mock: "Offline checks, offline fixtures or simulation. See the selected run's provenance for its exact mode.",
       replay: "Replay — viewing a saved run report. " + (active === "replay" ? "Loaded from a local file; nothing re-executed." : (health && health.llm_mode === "replay" ? llm.desc : "Not active.")),
     };
@@ -174,7 +175,7 @@
         "Cannot reach " + (PP.config.apiBase || location.origin) + "/api/health. Retrying every " + Math.round(PP.config.healthIntervalMs / 1000) + " s. Start the server with start.bat or `python -m backend.launcher`."));
     }
     if (state.control.mode === "v1") {
-      list.push(banner("info", "info", "Meta AI disabled.", "Operations use offline checks, explicit fixtures or simulation. No paid model calls or AI Security Fix are enabled."));
+      list.push(banner("info", "info", "Explicit execution modes.", "Ordinary Run control uses offline checks, fixtures or simulation. Real Meta AI demo requires local owner permission and per-run paid confirmation. AI Security Fix is not enabled."));
       if (!state.control.capabilities.docker.available) list.push(banner("warn", "box", "Docker unavailable.", "Container execution is blocked. Ready static operations and simulation may remain available; check the selected language and operation."));
     } else if (health.data && state.control.mode === "legacy") {
       const mode = health.data.llm_mode;

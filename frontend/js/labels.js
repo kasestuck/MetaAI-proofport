@@ -200,6 +200,10 @@
           : review ? "Saved real Meta proposal · rejected / needs review" : "Saved Meta record · not verified",
         desc: "Historical recorded results, not a new live run. No API call is made by replay. Inspect the original report and pack manifest; local hashes are not an external signature." };
     }
+    const demo = saved && saved.live_demo || run.control && run.control.result && run.control.result.live_demo;
+    if (demo) return {id:"live_demo",source:"control",simulated:false,tone:run.state && run.state.status==="failed"?"warn":"info",
+      label:replayPrefix+languageName(language(run))+" Live Meta AI demo",
+      desc:(run.origin==="replay"?"Saved scoped run, no new generation. ":"Fixed approved module; generation is separate from verification. ")+"No security audit/fix is included. Check finalized report, tests and evidence before accepting a result."};
     if (language(run) === "php") {
       const v = report && report.verification || {};
       const p = parameters(run);

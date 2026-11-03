@@ -84,6 +84,10 @@
       return request("/api/v1/runs", { method: "POST", body, headers: { "Idempotency-Key": key } });
     },
     runDetails(id) { return request("/api/v1/runs/" + encodeURIComponent(id)); },
+    demoMetadata() { return request("/api/v1/live-demo"); },
+    demoCheckModel() { return request("/api/v1/live-demo/model-check", { method: "POST" }); },
+    demoConfirm(profile) { return request("/api/v1/live-demo/confirm", { method: "POST", body: {profile, consent: true} }); },
+    demoStart(body, key) { return request("/api/v1/live-demo/runs", { method: "POST", body, headers: {"Idempotency-Key": key} }); },
 
     /** GET /api/health -> {ok, docker, llm_mode} */
     health() {

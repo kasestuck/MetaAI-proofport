@@ -116,6 +116,14 @@
   ];
 
   function stepsFor(run) {
+    const demo = run && (run.control && run.control.result && run.control.result.live_demo || run.report && run.report.verification && run.report.verification.live_demo);
+    if (demo) return [
+      {id:"analyze",label:"Analyze scoped module",phase:"analyzing",events:["live_demo_analyzing"],desc:"Original inventory and hashes"},
+      {id:"record",label:"Golden baseline",phase:"recording",events:["live_demo_recording","live_demo_baseline_verified"],desc:"Actual source-runtime observations and existing tests"},
+      {id:"migrate",label:"Meta AI translation / repair",phase:"migrating",events:["live_demo_translating","live_demo_fixing"],desc:"At most two explicitly approved calls; no fixtures"},
+      {id:"verify",label:"Docker verification",phase:"testing",events:["live_demo_testing","live_demo_verified_iteration"],desc:"Syntax, golden comparisons and existing tests"},
+      {id:"report",label:"Evidence / report",phase:"reporting",events:["live_demo_verified"],desc:"Acceptance requires unchanged originals and intact evidence"},
+    ];
     if (L.language(run) !== "php") return STEPS;
     const p = L.parameters(run);
     const operation = p.operation || (p.mode || "").replace(/^php_/, "");
@@ -569,8 +577,10 @@
       // Order: start → live run (or empty state) → operations → replay.
       const controlHost = h("div");
       controlForm = PP.controlForm.mount(controlHost);
+      const demoHost = h("div");
+      if (PP.liveDemo) PP.liveDemo.mount(demoHost,{offlineHost:controlHost});
       legacyHost = h("div", { class: "stack-lg" }, buildStart(), buildOperations());
-      root.replaceChildren(h("div", { class: "stack-lg" }, controlHost, legacyHost, dynamic, replayCard()));
+      root.replaceChildren(h("div", { class: "stack-lg" }, demoHost, controlHost, legacyHost, dynamic, replayCard()));
     },
     update: render,
   };

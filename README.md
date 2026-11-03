@@ -12,7 +12,7 @@ All Proofport-owned code was written during **Oct 27–Nov 4, 2026** for the Met
 
 ## How it uses Meta models
 
-[LLMClient](backend/llm/client.py) calls `https://api.meta.ai/v1`; genuine recorded runs used `muse-spark-1.3`. Settings: `MODEL_API_KEY`, `MODEL_NAME`, `MODEL_BASE_URL`, `LLM_MODE`. [ModelSession](backend/ai/provider.py) uses [language-specific prompts](backend/ai/prompts.py) for complete-file translation, repair from original/previous code plus expected/actual failures, and scanner-selected security proposals. Models propose; Docker checks and conservative policy decide. Standalone automatic model triage is not a dashboard feature. Live CLI jobs require separate module/finding approval and call/token/cost limits. Public API/UI live generation stays disabled. No paid transport retries or hidden fixture fallback. Mock, offline fixtures and saved replay never become new live Meta runs.
+[LLMClient](backend/llm/client.py) calls `https://api.meta.ai/v1`; genuine recorded runs used `muse-spark-1.3`. Settings: `MODEL_API_KEY`, `MODEL_NAME`, `MODEL_BASE_URL`, `LLM_MODE`. [ModelSession](backend/ai/provider.py) uses [language-specific prompts](backend/ai/prompts.py) for complete-file translation, repair from original/previous code plus expected/actual failures, and scanner-selected security proposals. Models propose; Docker checks and conservative policy decide. Standalone automatic model triage is not a dashboard feature. Live CLI jobs require separate module/finding approval and call/token/cost limits. Generic live generation stays disabled; the [P13 Dashboard demo](backend/P13_LIVE_DEMO.md) allows only the two fixed modules with local owner permission and fresh paid UI consent. No paid transport retries or hidden fixture fallback. Mock, offline fixtures and saved replay never become new live Meta runs.
 
 ## What it does
 
@@ -27,7 +27,7 @@ All Proofport-owned code was written during **Oct 27–Nov 4, 2026** for the Met
 
 | Operation | Implemented scope |
 | --- | --- |
-| Migration | PHP **7.4.33 → 8.3.36**, original `php_shop`, 22 golden cases, 9 native tests; authored fixture mode in UI/CLI. |
+| Migration | PHP **7.4.33 → 8.3.36**, original `php_shop`, 22 golden cases, 9 native tests; authored fixture mode plus the separately approved P13 single-file live demo. |
 | Security audit | Limited lexical rules for SQL injection, XSS, command injection, unsafe deserialization, path traversal, hardcoded secrets, weak hashing and unsafe uploads. Findings are potential risks. |
 | Compatibility | PHP **7.4 → 8.3**; separate syntax, tests and behavior results. The unchanged legacy demo is expected to expose incompatibilities. |
 | Fix verification | Offline proposals, both runtimes, golden/tests/rescan and rollback; changed contracts remain `needs_review`. |
@@ -48,7 +48,7 @@ Costs use recorded usage/configured rates, not provider invoices. Comparison all
 
 ## Quick start — Windows and VS Code
 
-Install Git, **Python 3.12**, Docker Desktop (**Linux containers**) and optionally VS Code; Node 24 is needed only for frontend tests. No API key is needed for offline checks/replay. A Meta key and separate approval are required only for live CLI work. For a fresh clone, run these commands in PowerShell, then use **Terminal → New Terminal** in VS Code:
+Install Git, **Python 3.12**, Docker Desktop (**Linux containers**) and optionally VS Code; Node 24 is needed only for frontend tests. No API key is needed for offline checks/replay. A new private Meta key and separate approval are required for live CLI or the fixed P13 Dashboard demo. For a fresh clone, run these commands in PowerShell, then use **Terminal → New Terminal** in VS Code:
 ```powershell
 git clone https://github.com/kasestuck/MetaAI-proofport.git
 cd MetaAI-proofport

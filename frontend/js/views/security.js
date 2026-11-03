@@ -59,6 +59,9 @@
     const p = L.provenance(run);
     if (!p) return null;
     const historic = run.report && run.report.verification && run.report.verification.historical;
+    const demo = run.report && run.report.verification && run.report.verification.live_demo || run.control && run.control.result && run.control.result.live_demo;
+    if (demo && demo.security_scanned === false) return h("div", {class:"callout"},
+      "No security scan or fix is included in this live module demo. Zero findings mean not scanned, not secure.");
     if (historic && historic.security_scanned === false) return h("div", { class: "callout" },
       "No security scan was part of this saved module migration. Zero findings mean not scanned, not secure.");
     if (L.language(run) === "php") return h("div", { class: "callout" }, icon("info", "icon-inline"), " ",

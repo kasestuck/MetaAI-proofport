@@ -390,3 +390,16 @@ syntax-only check ran no project tests and claimed no behavior verification.
 Source hashes, persisted JSON/HTML, legacy event/report access and zero model
 usage were asserted. A finalization race affecting elapsed seconds was found
 by the real smoke checks, fixed, regression-tested and rechecked successfully.
+
+
+## P13: additive fixed live-demo profiles
+
+The generic `/api/v1/runs` live-mode prohibition remains. A separate fixed-scope
+[Dashboard live-demo extension](P13_LIVE_DEMO.md) reuses the P8 Python/PHP CLI
+engines. It adds four `/api/v1/live-demo` routes and `capabilities.live_demo`;
+only the two known modules are eligible. New specialized runs reuse ordinary
+v1 run polling and legacy events/reports, with additive `result.live_demo`.
+An isolated newly confirmed key, local owner approval, catalog metadata and
+expiring one-use paid UI consent are mandatory. Browser payloads cannot supply
+keys, source paths or budgets. The existing shared run slot and finalization
+logic still apply. No real model request was used to test this extension.
