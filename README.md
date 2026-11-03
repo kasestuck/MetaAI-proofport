@@ -185,6 +185,34 @@ details. **Never rerun paid commands just to inspect saved results.**
 
 See [Security policy](SECURITY.md) and [release readiness](docs/RELEASE_READINESS.md).
 
+## Try Proofport — 10 Judge Test Scenarios
+
+The [judge suite](judge_tests/README.md) provides exactly ten independently
+selectable owned scenarios: Python/PHP fixture migrations, math edges,
+compatibility, SQL/eval/secrets/crypto, XSS, constant-command hardening and rollback.
+All are **offline**, with actual Docker verification and zero Meta calls.
+
+Install the pinned requirements in a Python 3.12 `.venv`, start Docker Desktop
+with Linux containers, and explicitly install only the required images listed in
+the suite README. Run Proofport with `start.bat` for optional UI inspection; the
+suite itself needs no server, API key or manual `.env` changes.
+
+```powershell
+judge_tests\run.bat
+judge_tests\run.bat --scenario 05
+.venv/Scripts/python.exe judge_tests/runner.py --list
+```
+
+The runner prints a saved JSON summary with per-scenario PASS / FAIL / SKIP /
+NEEDS_REVIEW, real hashes/checks and evidence. Exit 0 requires all selected
+mandatory assertions to pass; a mandatory skip is nonzero. An expected
+NEEDS_REVIEW confirms rejection/rollback, **not** an accepted security fix.
+
+These ten offline scenarios are separate from the genuine historical Meta
+migrations above. No fixture is substituted for a model answer and no saved
+replay is presented as a new live run. See the [P11 release audit](docs/P11_RELEASE.md)
+for actual results, branch preservation and publication limits.
+
 ## Tests
 
 ```powershell
