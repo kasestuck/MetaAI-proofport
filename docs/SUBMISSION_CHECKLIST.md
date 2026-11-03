@@ -37,10 +37,8 @@ and submit early. No reminder or submission automation was created.
   exists, but public access cannot be claimed. The connector also could not see
   it. The owner must review
   and publish the intended release snapshot, then test signed out.
-- [ ] **Correct code revision published.** The assembled P11/P12 release is local
-  on `release/hackathon`; backend/frontend/integration history is included.
-  P12 performs no merge/rebase/push. Follow [publication verification](P12_PUBLICATION.md).
-  Confirm the published branch/link contains
+- [ ] **Correct code revision published.** Compare the intended local `main`
+  revision with the remote commit before submission. Confirm the published link contains
   the reviewed frontend/backend, README and license; an old default branch is not enough.
 - [x] **English README drafted**, including architecture, Windows/Docker setup,
   actual results, limitations, security, Meta integration and AI disclosure.
@@ -80,7 +78,7 @@ and submit early. No reminder or submission automation was created.
 - [ ] Check README links, selected branch, MIT/third-party notices and `.gitignore`.
 - [ ] Keep `.env`, `.venv`, caches, generated candidates/reports and private keys out
   of Git. Explicitly reviewed demo archives are published separately, not staged wholesale.
-- [ ] Run fast tests and bounded smoke from [release readiness](RELEASE_READINESS.md).
+- [ ] Run fast tests and bounded smoke from [README test instructions](../README.md#try-proofport--10-judge-test-scenarios).
 - [ ] Recheck the exported pack after downloading/unpacking it on another path.
 - [ ] Rehearse all three scenarios with [runbook](DEMO_RUNBOOK.md) and
   [script](DEMO_SCRIPT.md). A saved replay must never be presented as new generation.

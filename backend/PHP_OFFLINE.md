@@ -3,8 +3,8 @@
 Implemented on `integration/p4`. This is authored fixture migration and finite
 Docker verification, **not Meta AI migration, AI remediation, or universal PHP
 support**. No model SDK, API key or paid request is used. Frontend and original
-`samples/legacy_shop` are unchanged. See `PHP_FOUNDATION.md` for the earlier
-P6.1 historical inventory and analyzer limitations.
+`samples/legacy_shop` are unchanged. The PHP analyzer is lexical and bounded;
+its findings do not establish full language or framework compatibility.
 
 ## Architecture
 

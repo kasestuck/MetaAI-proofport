@@ -24,7 +24,7 @@ PHP images are only configured candidates, never verified operation support.
 PHP-only runs fail preflight/creation with `language_not_enabled`; the legacy
 error envelope is preserved. Existing Python requests on mixed projects retain
 their Python-only scope and make no PHP verification claims. See
-[PHP_FOUNDATION.md](PHP_FOUNDATION.md) for exact semantics and future stages.
+[PHP_OFFLINE.md](PHP_OFFLINE.md) for the implemented PHP operations and limits.
 
 Implemented on `backend/codex`, 2026-11-01. Frontend is unchanged. This is an
 additive, local, single-process control API; it does not enable live Meta AI.

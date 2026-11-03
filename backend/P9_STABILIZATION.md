@@ -172,8 +172,8 @@ Local generated artifacts are ignored, not committed or deleted:
 `python -m backend.diagnostics.p9` deliberately repeats the owned-demo review in
 fresh working directories using installed Docker images. It blocks model client
 construction/completion explicitly. Do not run it as an ordinary fast test.
-Existing real browser probes and launch instructions are in `INTEGRATION_P4.md`
-and `frontend/tests/php.browser.integration.cjs`. Normal UI startup remains:
+Current launch instructions are in the root README; the PHP browser probe is
+`frontend/tests/php.browser.integration.cjs`. The historical P9 startup command was:
 
 ```powershell
 .venv/Scripts/python.exe -m uvicorn backend.api.main:app --host 127.0.0.1 --port 8765

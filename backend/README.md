@@ -1,12 +1,13 @@
 # Proofport backend
 
-## Current release entry point (P10)
+## Current release entry point
 
-Use the [root README](../README.md) and [release report](../docs/RELEASE_READINESS.md)
-for the current integrated Python/PHP application. Genuine scoped Meta migrations
+Use the [root README](../README.md) for the current integrated Python/PHP
+application and launch/test instructions. Genuine scoped Meta migrations
 and a rejected real security proposal are documented in P82/P83/P84 result files.
-Explicit response replay is implemented internally; public live generation stays
-disabled. `python -m backend.release prepare-demo` exports checked saved evidence,
+Explicit response replay is implemented internally. Generic public live generation
+stays disabled; the fixed-scope [Dashboard live demo](P13_LIVE_DEMO.md) requires
+private configuration and explicit paid-run consent. `python -m backend.release prepare-demo` exports checked saved evidence,
 not a new model run. API operation selection uses per-run UI controls.
 
 **The P0–P5 notes below are historical**, including their earlier unverified-model

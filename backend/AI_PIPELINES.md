@@ -1,9 +1,9 @@
 # P7 — structured model-response migration and security verification
 
-P8 update: [FIRST_AI_MIGRATION.md](FIRST_AI_MIGRATION.md) documents a separately
-approved local first-module live path after a successful synthetic Meta smoke.
-It is awaiting migration permission/results. Generic AIJob and public live
-capabilities remain disabled. The P7 results below are historical offline checks.
+Current live operation is documented in [P13_LIVE_DEMO.md](P13_LIVE_DEMO.md).
+Historical verified results are in [P82_LIVE_RESULT.md](P82_LIVE_RESULT.md) and
+[P83_PHP_LIVE_RESULT.md](P83_PHP_LIVE_RESULT.md). Generic AIJob live launching
+remains disabled; the P7 results below are historical offline checks.
 
 Implemented in `integration/p4`, starting at frontend `0e4c97f`. This milestone
 connects LLMClient to both language adapters and the existing verification/fix

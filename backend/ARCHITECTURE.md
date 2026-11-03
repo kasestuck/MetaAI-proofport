@@ -7,7 +7,8 @@ Python/PHP adapter/pipeline architecture is unchanged. `backend.release` adds
 read-only Git auditing and portable, sealed saved-real-run demo exports; it cannot
 make a model call, execute a project or publish anything. Display projections keep
 the original evidence chain and explicit historical provenance. See
-`docs/RELEASE_READINESS.md` for actual tests, publication gates and remaining risks.
+[README](../README.md) for launch/test instructions and
+[submission checklist](../docs/SUBMISSION_CHECKLIST.md) for remaining owner tasks.
 
 ## P7 structured model-response orchestration
 
@@ -40,8 +41,8 @@ PHP run operations remain disabled, even when an image is present. Python-only
 requests retain their existing scope and settings. No PHP tests/golden/security
 or fix execution is implemented in this stage. Docker was unavailable during
 verification, so real PHP integration tests skipped without pulls or support
-claims. See [PHP_FOUNDATION.md](PHP_FOUNDATION.md) for actual checks, limitations
-and the P6.2–P6.5 plan.
+claims. See [PHP_OFFLINE.md](PHP_OFFLINE.md) for the subsequently implemented PHP
+execution, verification and limitations.
 
 ## P4.1 per-run API control plane: 2026-11-01
 
