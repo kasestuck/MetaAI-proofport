@@ -1,0 +1,23 @@
+{
+  "id": "08_php_xss",
+  "language": "php",
+  "operation": "security_fix_verification",
+  "worker": "php_security",
+  "source_version": "7.4",
+  "target_version": "8.3",
+  "source": "judge_tests/08_php_xss/project",
+  "cases": "judge_tests/08_php_xss/cases.json",
+  "candidate": "judge_tests/08_php_xss/candidate.php",
+  "rules": [
+    "PHP-XSS"
+  ],
+  "behavior_impact": "changes",
+  "review_areas": [
+    "api"
+  ],
+  "expected_status": "NEEDS_REVIEW",
+  "required_images": [
+    "php:7.4.33-cli",
+    "php:8.3.36-cli"
+  ]
+}

@@ -1,0 +1,178 @@
+{
+  "provenance": "Authored offline input cases; outputs must be recorded in Docker, not precomputed.",
+  "cases": [
+    {
+      "id": "1",
+      "module": "math_edges",
+      "steps": [
+        {
+          "call": "math_edges.divide",
+          "args": [
+            1,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "module": "math_edges",
+      "steps": [
+        {
+          "call": "math_edges.divide",
+          "args": [
+            -3,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "module": "math_edges",
+      "steps": [
+        {
+          "call": "math_edges.divide",
+          "args": [
+            1.0,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "module": "math_edges",
+      "steps": [
+        {
+          "call": "math_edges.divide",
+          "args": [
+            5,
+            2.0
+          ]
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "module": "math_edges",
+      "steps": [
+        {
+          "call": "math_edges.divide",
+          "args": [
+            1,
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "module": "math_edges",
+      "steps": [
+        {
+          "call": "math_edges.dollars",
+          "args": [
+            2.5
+          ]
+        }
+      ]
+    },
+    {
+      "id": "7",
+      "module": "math_edges",
+      "steps": [
+        {
+          "call": "math_edges.dollars",
+          "args": [
+            -2.5
+          ]
+        }
+      ]
+    },
+    {
+      "id": "8",
+      "module": "math_edges",
+      "steps": [
+        {
+          "call": "math_edges.dollars",
+          "args": [
+            1.49
+          ]
+        }
+      ]
+    },
+    {
+      "id": "9",
+      "module": "math_edges",
+      "steps": [
+        {
+          "call": "math_edges.dollars",
+          "args": [
+            -1.49
+          ]
+        }
+      ]
+    },
+    {
+      "id": "10",
+      "module": "math_edges",
+      "steps": [
+        {
+          "call": "math_edges.factorial",
+          "args": [
+            0
+          ]
+        }
+      ]
+    },
+    {
+      "id": "11",
+      "module": "math_edges",
+      "steps": [
+        {
+          "call": "math_edges.factorial",
+          "args": [
+            1
+          ]
+        }
+      ]
+    },
+    {
+      "id": "12",
+      "module": "math_edges",
+      "steps": [
+        {
+          "call": "math_edges.factorial",
+          "args": [
+            5
+          ]
+        }
+      ]
+    },
+    {
+      "id": "13",
+      "module": "math_edges",
+      "steps": [
+        {
+          "call": "math_edges.factorial",
+          "args": [
+            25
+          ]
+        }
+      ]
+    },
+    {
+      "id": "14",
+      "module": "math_edges",
+      "steps": [
+        {
+          "call": "math_edges.factorial",
+          "args": [
+            -1
+          ]
+        }
+      ]
+    }
+  ]
+}

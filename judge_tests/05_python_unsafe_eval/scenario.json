@@ -1,0 +1,28 @@
+{
+  "id": "05_python_unsafe_eval",
+  "language": "python",
+  "operation": "security_fix_verification",
+  "worker": "python_security",
+  "source_version": "3.12",
+  "target_version": "3.12",
+  "source": "judge_tests/05_python_unsafe_eval/project",
+  "cases": "judge_tests/05_python_unsafe_eval/cases.json",
+  "proposals": [
+    {
+      "rule": "B307",
+      "candidate": "judge_tests/05_python_unsafe_eval/candidate_1.py",
+      "review_areas": [
+        "api",
+        "data_format"
+      ]
+    }
+  ],
+  "rules": [
+    "B307"
+  ],
+  "expected_status": "NEEDS_REVIEW",
+  "required_images": [
+    "python:3.12-slim",
+    "proofport-bandit:1.8.6"
+  ]
+}

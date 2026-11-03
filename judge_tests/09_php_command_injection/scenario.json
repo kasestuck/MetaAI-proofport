@@ -1,0 +1,21 @@
+{
+  "id": "09_php_command_injection",
+  "language": "php",
+  "operation": "security_fix_verification",
+  "worker": "php_security",
+  "source_version": "7.4",
+  "target_version": "8.3",
+  "source": "judge_tests/09_php_command_injection/project",
+  "cases": "judge_tests/09_php_command_injection/cases.json",
+  "candidate": "judge_tests/09_php_command_injection/candidate.php",
+  "rules": [
+    "PHP-CMD"
+  ],
+  "behavior_impact": "preserves",
+  "review_areas": [],
+  "expected_status": "PASS",
+  "required_images": [
+    "php:7.4.33-cli",
+    "php:8.3.36-cli"
+  ]
+}

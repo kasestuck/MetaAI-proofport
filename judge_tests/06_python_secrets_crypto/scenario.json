@@ -1,0 +1,36 @@
+{
+  "id": "06_python_secrets_crypto",
+  "language": "python",
+  "operation": "security_fix_verification",
+  "worker": "python_security",
+  "source_version": "3.12",
+  "target_version": "3.12",
+  "source": "judge_tests/06_python_secrets_crypto/project",
+  "cases": "judge_tests/06_python_secrets_crypto/cases.json",
+  "proposals": [
+    {
+      "rule": "B105",
+      "candidate": "judge_tests/06_python_secrets_crypto/candidate_1.py",
+      "review_areas": [
+        "configuration"
+      ]
+    },
+    {
+      "rule": "B324",
+      "candidate": "judge_tests/06_python_secrets_crypto/candidate_2.py",
+      "review_areas": [
+        "crypto",
+        "data_format"
+      ]
+    }
+  ],
+  "rules": [
+    "B105",
+    "B324"
+  ],
+  "expected_status": "NEEDS_REVIEW",
+  "required_images": [
+    "python:3.12-slim",
+    "proofport-bandit:1.8.6"
+  ]
+}

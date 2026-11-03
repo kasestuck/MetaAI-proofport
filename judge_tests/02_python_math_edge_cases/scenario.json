@@ -1,0 +1,19 @@
+{
+  "id": "02_python_math_edge_cases",
+  "language": "python",
+  "operation": "migration",
+  "worker": "python_pair",
+  "source_version": "2.7",
+  "target_version": "3.12",
+  "source": "judge_tests/02_python_math_edge_cases/project",
+  "cases": "judge_tests/02_python_math_edge_cases/cases.json",
+  "candidates": {
+    "math_edges.py": "judge_tests/02_python_math_edge_cases/candidate.py"
+  },
+  "expected_cases": 14,
+  "expected_status": "PASS",
+  "required_images": [
+    "python:2.7",
+    "python:3.12-slim"
+  ]
+}

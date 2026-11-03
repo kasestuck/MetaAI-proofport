@@ -1,0 +1,27 @@
+{
+  "id": "04_python_sql_injection",
+  "language": "python",
+  "operation": "security_fix_verification",
+  "worker": "python_security",
+  "source_version": "3.12",
+  "target_version": "3.12",
+  "source": "judge_tests/04_python_sql_injection/project",
+  "cases": "judge_tests/04_python_sql_injection/cases.json",
+  "proposals": [
+    {
+      "rule": "B608",
+      "candidate": "judge_tests/04_python_sql_injection/candidate_1.py",
+      "review_areas": [
+        "api"
+      ]
+    }
+  ],
+  "rules": [
+    "B608"
+  ],
+  "expected_status": "NEEDS_REVIEW",
+  "required_images": [
+    "python:3.12-slim",
+    "proofport-bandit:1.8.6"
+  ]
+}

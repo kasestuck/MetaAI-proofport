@@ -1,0 +1,67 @@
+{
+  "provenance": "Authored offline input cases; outputs must be recorded in Docker, not precomputed.",
+  "cases": [
+    {
+      "id": "1",
+      "module": "records",
+      "steps": [
+        {
+          "call": "records.format_name",
+          "args": [
+            " Demo "
+          ]
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "module": "records",
+      "steps": [
+        {
+          "call": "records.format_name",
+          "args": [
+            "Stra\u00dfe"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "module": "records",
+      "steps": [
+        {
+          "call": "records.format_name",
+          "args": [
+            ""
+          ]
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "module": "records",
+      "steps": [
+        {
+          "call": "records.combine",
+          "args": [
+            2,
+            3
+          ]
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "module": "records",
+      "steps": [
+        {
+          "call": "records.combine",
+          "args": [
+            -2,
+            3
+          ]
+        }
+      ]
+    }
+  ]
+}

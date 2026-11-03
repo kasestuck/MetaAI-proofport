@@ -1,0 +1,16 @@
+{
+  "id": "07_php_legacy_migration",
+  "language": "php",
+  "operation": "migration",
+  "worker": "php_migration",
+  "source_version": "7.4",
+  "target_version": "8.3",
+  "source": "tests/fixtures/php_shop",
+  "cases": "tests/fixtures/php_profiles/cases.json",
+  "fixture": "tests/fixtures/php_profiles/migration.json",
+  "expected_status": "PASS",
+  "required_images": [
+    "php:7.4.33-cli",
+    "php:8.3.36-cli"
+  ]
+}

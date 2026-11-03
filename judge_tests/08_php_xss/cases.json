@@ -1,0 +1,33 @@
+{
+  "mode": "php_golden_inputs",
+  "allowed_differences": [],
+  "cases": [
+    {
+      "id": "render-0",
+      "file": "src/view.php",
+      "call": "JudgeXss\\render",
+      "args": [
+        "demo"
+      ],
+      "expected_status": "return"
+    },
+    {
+      "id": "render-1",
+      "file": "src/view.php",
+      "call": "JudgeXss\\render",
+      "args": [
+        "<b>demo</b>"
+      ],
+      "expected_status": "return"
+    },
+    {
+      "id": "render-2",
+      "file": "src/view.php",
+      "call": "JudgeXss\\render",
+      "args": [
+        ""
+      ],
+      "expected_status": "return"
+    }
+  ]
+}

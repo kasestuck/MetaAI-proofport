@@ -1,0 +1,4 @@
+# Raw-byte-bound PHP fixture manifests require LF on every checkout.
+# Current fixture bytes already use LF; do not renormalize original demo files.
+tests/fixtures/php_shop/** text eol=lf
+judge_tests/** text eol=lf

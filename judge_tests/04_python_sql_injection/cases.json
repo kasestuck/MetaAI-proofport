@@ -1,0 +1,41 @@
+{
+  "provenance": "Authored offline input cases; outputs must be recorded in Docker, not precomputed.",
+  "cases": [
+    {
+      "id": "1",
+      "module": "subject",
+      "steps": [
+        {
+          "call": "subject.build_query",
+          "args": [
+            "demo"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "module": "subject",
+      "steps": [
+        {
+          "call": "subject.build_query",
+          "args": [
+            "1"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "module": "subject",
+      "steps": [
+        {
+          "call": "subject.build_query",
+          "args": [
+            ""
+          ]
+        }
+      ]
+    }
+  ]
+}

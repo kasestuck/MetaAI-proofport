@@ -1,0 +1,13 @@
+{
+  "mode": "php_golden_inputs",
+  "allowed_differences": [],
+  "cases": [
+    {
+      "id": "constant-output",
+      "file": "src/commands.php",
+      "call": "ProofportPhpDemo\\constant_banner",
+      "args": [],
+      "expected_status": "return"
+    }
+  ]
+}
