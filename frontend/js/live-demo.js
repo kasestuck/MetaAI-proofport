@@ -51,11 +51,12 @@
         const next=await PP.api.demoMetadata();
         if(!next || typeof next.instance_id!=="string" || !Array.isArray(next.profiles) || typeof next.enabled!=="boolean") throw new Error("Invalid live demo metadata; no paid action allowed.");
         metadata=next;
+        PP.liveDemo.status=next;
         const selected=profile.value;
         profile.replaceChildren(...next.profiles.map(p=>h("option",{value:p.id},p.language+": "+p.file+" "+p.source_version+" → "+p.target_version)));
         profile.value=next.profiles.some(p=>p.id===selected)?selected:next.profiles[0]?.id||"";
         if(old && old!==next.instance_id){revision++;consent.checked=false;error.textContent="Backend instance changed; no old paid request was repeated.";}
-      } catch(e){metadata=null;error.textContent=e.message;}
+      } catch(e){metadata=null;PP.liveDemo.status=null;error.textContent=e.message;}
       update();
     }
     async function submit() {

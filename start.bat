@@ -51,8 +51,9 @@ if errorlevel 1 (
     echo Dependency installation failed. Check your internet connection and try again.
     goto failed
 )
-if not defined PROOFPORT_PORT set "PROOFPORT_PORT=8000"
-echo Starting Proofport at http://127.0.0.1:%PROOFPORT_PORT% - press Ctrl+C to stop.
+echo Starting Proofport - press Ctrl+C to stop.
+echo Approved P13 live demo defaults to port 8765; offline startup defaults to 8000.
+echo PROOFPORT_PORT overrides the port. P13 keys remain in backend\.tmp\meta-demo.env.
 echo Choose Python/PHP operations in Run control; readiness checks local images and profiles.
 echo Offline fixtures are not AI migration. Saved real reports are replay, not new API calls.
 ".venv\Scripts\python.exe" -m backend.launcher

@@ -102,7 +102,8 @@
     let active = null;
     if (run && run.origin === "replay") active = "replay";
     else if (run && run.control && run.control.execution.live_enabled) active = "live";
-    else if (state.control.mode === "v1") active = "mock";
+    else if (run && run.control) active = run.control.execution.effective === "live" ? "live" : "mock";
+    else if (state.control.mode === "v1") active = PP.liveDemo && PP.liveDemo.status && PP.liveDemo.status.enabled ? "live" : "mock";
     else if (state.control.mode === "legacy" && health && health.llm_mode !== "live") active = health.llm_mode;
     const llm = L.llmMode(health && health.llm_mode);
     const titles = {

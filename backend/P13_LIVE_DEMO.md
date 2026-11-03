@@ -157,3 +157,22 @@ with one attempt. Rollback restores actual candidate bytes; bridge-chain
 corruption cannot preserve a successful state. No test made a real Meta call.
 Python/PHP offline judge regressions were also checked separately; raw results
 are retained under ignored `backend/.work/`. No images were pulled.
+
+
+## Approved live startup (4 November 2026)
+
+`start.bat` delegates mode/port selection to `backend.launcher`. When the isolated
+private P13 file is complete and locally approved, the launcher publishes only
+`LLM_MODE=live` to its process and defaults to loopback port 8765. It never exports
+the API key or model credentials into the environment. Offline startup keeps
+port 8000; `PROOFPORT_PORT` overrides either default. Startup performs no Meta
+generation or automatic catalog request. P13 still reads and validates its own
+private file for each run; the generic API live prohibition remains unchanged.
+
+The Dashboard readiness indicator follows the P13 metadata. A selected existing
+offline run retains its offline indicator even while live access is configured.
+After restarting, use `Check model access (catalog only)` and `Refresh readiness`.
+Catalog proof expires after five minutes; repeat the catalog check when needed.
+The paid button stays disabled until you check consent and confirm its dialog.
+Do not put a real key in tracked `.env.example`. It belongs only in the ignored
+`backend/.tmp/meta-demo.env`.

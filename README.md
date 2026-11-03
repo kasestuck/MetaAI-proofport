@@ -59,7 +59,7 @@ if (!(Test-Path .venv/Scripts/python.exe)) { py -3.12 -m venv .venv }
 if (!(Test-Path .env)) { Copy-Item .env.example .env }
 .\start.bat
 ```
-For an existing checkout, skip cloning and open its root. If `code` is unavailable, use **File → Open Folder**. Choose **Python: Select Interpreter → .venv/Scripts/python.exe** if using VS Code's Python extension; terminal commands above need no environment activation. Existing venv must be Python 3.12. `start.bat` checks it, installs pins, starts FastAPI and opens **http://127.0.0.1:8000**. Use another terminal for setup/tests; keep the server terminal open. Ctrl+C stops your app. To change port, set `$env:PROOFPORT_PORT = '8765'` before `.\start.bat`. `.env.example` defaults to `LLM_MODE=mock`; changing it to live alone does not enable paid calls or live UI migration.
+For an existing checkout, skip cloning and open its root. If `code` is unavailable, use **File → Open Folder**. Choose **Python: Select Interpreter → .venv/Scripts/python.exe** if using VS Code's Python extension; terminal commands above need no environment activation. Existing venv must be Python 3.12. `start.bat` checks it, installs pins, starts FastAPI and opens **http://127.0.0.1:8000** for offline setup, or **http://127.0.0.1:8765** when the private P13 live configuration is approved. Use another terminal for setup/tests; keep the server terminal open. Ctrl+C stops your app. To change port, set `$env:PROOFPORT_PORT = '8765'` before `.\start.bat`. `.env.example` defaults to `LLM_MODE=mock`; changing it to live alone does not enable paid calls or live UI migration.
 
 ### Docker images and Python readiness
 
