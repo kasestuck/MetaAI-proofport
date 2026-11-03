@@ -51,6 +51,10 @@ def public_limits(limits):
     return {**asdict(limits), "max_cost_usd":str(limits.max_cost_usd)}
 
 
+def notify(progress, stage, **data):
+    if progress is not None: progress(stage, data)
+
+
 def digest(path):
     return sha256(path.read_bytes()).hexdigest()
 
@@ -66,8 +70,8 @@ def project_hashes(source=None):
     return hashes(root, files)
 
 
-def local_settings(env_file):
-    settings = {**dotenv_values(env_file), **os.environ}
+def local_settings(env_file, *, inherit_environment=True):
+    settings = {**dotenv_values(env_file), **(os.environ if inherit_environment else {})}
     expected = {"LLM_MODE":"live", "MODEL_NAME":"muse-spark-1.3",
                 "MODEL_BASE_URL":"https://api.meta.ai/v1",
                 "PRICE_IN_PER_MTOK":"1.25", "PRICE_OUT_PER_MTOK":"4.25"}
@@ -102,9 +106,9 @@ def scoped_tests(text):
     return "import unittest\nfrom legacy_shop import mathutils\n\n" + body + "\n", body
 
 
-def prepare(env_file, *, runner=None, profile="p8"):
+def prepare(env_file, *, runner=None, profile="p8", progress=None, isolate_settings=False):
     limits = profile_limits(profile)
-    settings = local_settings(env_file)
+    settings = local_settings(env_file, inherit_environment=False) if isolate_settings else local_settings(env_file)
     before = project_hashes()
     if any(settings["MODEL_API_KEY"].encode() in p.read_bytes() for p in inventory(SOURCE)[1]):
         raise ModelUnavailable("Credential found in project; no model request sent.", "credential_in_prompt")
@@ -130,7 +134,9 @@ def prepare(env_file, *, runner=None, profile="p8"):
     evidence = Evidence()
     evidence.bind(workspace / "preparation.log")
     evidence.append("scope", "Single module mathutils; existing MathTests class copied verbatim; imports narrowed. Full project suite NOT run.")
+    notify(progress, "analyzing")
     analysis = analyze(runner, original)
+    notify(progress, "recording")
     golden = invoke(runner, "python:2.7", original, "cases", cases, evidence)
     tests = invoke(runner, "python:2.7", original, "tests", evidence=evidence)
     if not suite_passed(tests) or tests["tests_run"] != 3:
@@ -217,10 +223,10 @@ def verify_candidate(runner, candidate, cases, golden, baseline, evidence):
     return result
 
 
-def execute(workspace, env_file, *, acknowledged=False, runner=None, client=None, profile="p8"):
+def execute(workspace, env_file, *, acknowledged=False, runner=None, client=None, profile="p8", progress=None, isolate_settings=False):
     if acknowledged is not True:
         raise ModelUnavailable("Separate permission and explicit paid acknowledgment required.", "approval_required")
-    settings = local_settings(env_file)
+    settings = local_settings(env_file, inherit_environment=False) if isolate_settings else local_settings(env_file)
     limits = profile_limits(profile)
     runner = runner or DockerRunner()
     manifest = validate_prepared(workspace, runner, profile=profile)
@@ -263,7 +269,9 @@ def execute(workspace, env_file, *, acknowledged=False, runner=None, client=None
         previous = feedback = None
         for iteration in range(1, limits.max_calls + 1):
             assert_originals(manifest["source_hashes"])
+            notify(progress, "translating" if iteration == 1 else "fixing", iteration=iteration)
             code = translator.translate(FILE, source, previous=previous, failures=feedback)
+            notify(progress, "testing", iteration=iteration, usage=[asdict(c) for c in client.calls], model_calls=len(client.attempts))
             (candidate / FILE).write_text(code, encoding="utf-8")
             saved = workspace / ("iteration_%02d" % iteration)
             shutil.copytree(candidate, saved)
@@ -274,6 +282,11 @@ def execute(workspace, env_file, *, acknowledged=False, runner=None, client=None
                 **{k:checks[k] for k in ("syntax_passed", "tests_passed", "behavior_verified")},
                 "verification_sha256":digest(workspace / ("verification_%02d.json" % iteration))}, sort_keys=True))
             report["iterations"].append(record)
+            if progress:
+                notify(progress,"verified_iteration",iteration=iteration,
+                    golden_matched=sum(c['matches'] for c in checks.get('comparisons',[])),golden_total=len(checks.get('comparisons',[])),
+                    tests_passed=sum(t['status']=='passed' for t in checks.get('target_tests',{}).get('outcomes',[])),
+                    tests_total=checks.get('target_tests',{}).get('tests_run',0))
             assert_originals(manifest["source_hashes"])
             # The model cannot change tests, initializers or any other baseline file.
             if any(digest(candidate / p) != value for p,value in manifest["scoped_hashes"].items() if p != FILE):

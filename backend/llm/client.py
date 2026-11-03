@@ -43,9 +43,9 @@ class CallUsage:
 class LLMClient:
     def __init__(self, env_file: str | Path | None = None, *, allow_live=False,
                  limits: LLMLimits | None = None, http_client=None, mode=None,
-                 replay_file=None, mock_responder=None):
+                 replay_file=None, mock_responder=None, inherit_environment=True):
         env_file = env_file or Path(__file__).resolve().parents[2] / ".env"
-        settings = {**dotenv_values(env_file), **os.environ}
+        settings = {**dotenv_values(env_file), **(os.environ if inherit_environment else {})}
         self.mode = (mode if mode is not None else settings.get("LLM_MODE") or "mock").strip().lower()
         if self.mode not in {"live", "mock", "replay"}:
             raise ModelUnavailable("LLM_MODE must be live, mock or explicit replay.")

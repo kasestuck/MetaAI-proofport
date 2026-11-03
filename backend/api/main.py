@@ -21,6 +21,8 @@ from backend.core.control_models import ControlError
 from backend.core.projects import ProjectCatalog
 from backend.core.control import ControlPlane
 from backend.api.control import router as control_router
+from backend.api.demo import router as demo_router
+from backend.ai.demo import LiveDemo
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -41,6 +43,7 @@ def create_app(root: Path = ROOT, step_seconds: float = 0.2) -> FastAPI:
     store = RunStore(root, step_seconds, pipeline=pipeline, settings=settings)
     projects = ProjectCatalog(root)
     control = ControlPlane(root, store, projects)
+    demo = LiveDemo(root, control)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -69,6 +72,7 @@ def create_app(root: Path = ROOT, step_seconds: float = 0.2) -> FastAPI:
         return response
     app.state.runs = store
     app.state.control = control
+    app.state.live_demo = demo
 
     @app.exception_handler(ControlError)
     async def control_error(request: Request, exc: ControlError):
@@ -123,6 +127,7 @@ def create_app(root: Path = ROOT, step_seconds: float = 0.2) -> FastAPI:
         return HTMLResponse(render_html(data), headers=headers)
 
     app.include_router(control_router(control))
+    app.include_router(demo_router(demo))
 
     # API routes must precede the catch-all static mount.
     frontend = root / "frontend"

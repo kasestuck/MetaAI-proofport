@@ -129,11 +129,17 @@ class RunStore:
         run.spec = spec
         run.use_real = (not simulation) if controlled else self.real_enabled
         if controlled:
-            run.verification["control"] = {"parameters": spec.public(), "live_enabled": False}
+            run.verification["control"] = {"parameters": spec.public(), "live_enabled": spec.pipeline == "live_demo"}
+            if pipeline == "live_demo":
+                run.state.modules = [Module(name=dict(spec.settings)["demo_file"],tests_total=0)]
+                run.verification["live_demo"] = {"profile":dict(spec.settings)["demo_profile"],
+                    "model_status":"queued; no model call yet","security_scanned":False,"billing_unknown":False}
         notice = (
             "SIMULATED run: no code execution, migration, model calls, or security fixes."
             if simulation else "Static source inventory only; no code execution, migration, tests, or security scan."
         )
+        if pipeline == "live_demo":
+            notice = "Live demo queued: fixed module and approved budget; no model request or dynamic check has run yet."
         run.evidence.append("run_started", notice)
         run.evidence.append("hashes_recorded", f"SHA-256 recorded from {len(originals)} actual source files.")
         run_id = uuid4().hex
@@ -164,6 +170,7 @@ class RunStore:
         pipeline = run.spec.pipeline
         worker = self._universal_pipeline if pipeline in {"analyze", "audit", "compatibility"} else (self._simulate if run.simulation else (self._real_pipeline if run.use_real else self._verification_unavailable))
         if run.spec.language == "php": worker = self._php_pipeline
+        if pipeline == "live_demo": worker = self.live_demo_worker
         try:
             await worker(run_id)
         except asyncio.CancelledError:

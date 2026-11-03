@@ -14,7 +14,7 @@ import shutil
 from uuid import uuid4
 
 from backend.ai import artifacts
-from backend.ai.first_live import ROOT, P82_LIMITS, digest, local_settings, public_limits, write
+from backend.ai.first_live import ROOT, P82_LIMITS, digest, local_settings, public_limits, write, notify
 from backend.ai.provider import ModelSession, PHPModuleLiveApproval, StructuredTranslator
 from backend.core.evidence import Evidence
 from backend.core.projects import copy_project, linked
@@ -38,8 +38,8 @@ def unchanged(before):
         raise ModelUnavailable('Original PHP project changed; no success claim.', 'source_changed')
 
 
-def prepare(env_file, *, runner=None):
-    settings = local_settings(env_file)
+def prepare(env_file, *, runner=None, progress=None, isolate_settings=False):
+    settings = local_settings(env_file, inherit_environment=False) if isolate_settings else local_settings(env_file)
     before = source_hashes(SOURCE)
     if any(settings['MODEL_API_KEY'].encode() in p.read_bytes() for p in inventory(SOURCE)[1]):
         raise ModelUnavailable('Credential found in input; stopped before copying.', 'credential_in_prompt')
@@ -54,9 +54,11 @@ def prepare(env_file, *, runner=None):
     profile = load_cases(CASES)
     scoped = [c for c in profile['cases'] if c['file'] == FILE]
     if len(profile['cases']) != 22 or len(scoped) != 5: raise ValueError('Review changed PHP case scope before live preparation')
+    notify(progress, "analyzing")
     analysis = analyze_php(original, source_version='7.4', target_version='8.3', evidence=evidence).analysis
     if analysis['diagnostics']: raise ValueError('PHP lexical analysis incomplete')
     executor = PHPExecutor(runner=runner, images=images, evidence=evidence)
+    notify(progress, "recording")
     source_lint = executor.lint(original,'7.4')
     source_tests = executor.tests(original,'7.4')
     golden = executor.cases(original,'7.4',profile)
@@ -134,10 +136,10 @@ def repair_feedback(checks, profile, golden, observed):
     return data
 
 
-def execute(workspace, env_file, *, acknowledged=False, runner=None, client=None):
+def execute(workspace, env_file, *, acknowledged=False, runner=None, client=None, progress=None, isolate_settings=False):
     if acknowledged is not True:
         raise ModelUnavailable('Separate paid permission and explicit acknowledgment required.', 'approval_required')
-    settings = local_settings(env_file)
+    settings = local_settings(env_file, inherit_environment=False) if isolate_settings else local_settings(env_file)
     runner = runner or DockerRunner()
     workspace = Path(workspace).absolute()
     manifest = validate_prepared(workspace,runner)
@@ -168,12 +170,19 @@ def execute(workspace, env_file, *, acknowledged=False, runner=None, client=None
         previous = feedback = None
         for iteration in range(1,LIMITS.max_calls+1):
             unchanged(manifest['original_hashes'])
+            notify(progress, "translating" if iteration == 1 else "fixing", iteration=iteration)
             code = translator.translate(FILE,source,previous,feedback)
+            notify(progress, "testing", iteration=iteration, usage=[asdict(c) for c in client.calls], model_calls=len(client.attempts))
             (candidate / FILE).write_bytes(code.encode())
             saved = workspace / ('iteration_%02d' % iteration); copy_project(candidate,saved)
             checks = verify(executor,candidate,'8.3',profile=profile,golden=golden,baseline_tests=baseline)
             record = {'iteration':iteration,'candidate':saved.name,'checks':checks}
             report['iterations'].append(record)
+            if progress:
+                notify(progress,"verified_iteration",iteration=iteration,
+                    golden_matched=checks['golden'].get('matched',0),golden_total=checks['golden'].get('total',0),
+                    tests_passed=sum(t['status']=='passed' for t in checks['existing_tests'].get('outcomes',[])),
+                    tests_total=checks['existing_tests'].get('tests_run',0))
             write(workspace / ('verification_%02d.json' % iteration),record)
             evidence.append('candidate_verified',json.dumps({'iteration':iteration,'passed':checks['passed'],
                 'sha256':digest(workspace / ('verification_%02d.json' % iteration))},sort_keys=True))

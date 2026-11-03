@@ -14,6 +14,8 @@ def router(control):
     @api.get("/capabilities")
     async def capabilities():
         data = await asyncio.to_thread(control.capabilities.snapshot)
+        if getattr(control,"live_demo",None):
+            data["live_demo"] = await asyncio.to_thread(control.live_demo.snapshot)
         return {**data, "instance_id": control.instance_id}
 
     @api.get("/projects")
