@@ -43,7 +43,6 @@ Historical real Meta runs, **not new runs or authored fixture results**:
 | Python `mathutils.py`, 2.7 → 3.12 | 31/31 | 3/3 | Accepted scoped migration / $0.00831575 |
 | PHP `src/legacy.php`, 7.4 → 8.3 | 22/22 | 9/9 | Accepted scoped migration / $0.00612075 |
 | Python unsafe-eval proposal | 5/9 | 0/1 | Rejected, rolled back, `needs_review` / $0.013249 |
-| Whole-project live run (planned; unverified) | [FILL IN FROM A REAL RUN] | [FILL IN FROM A REAL RUN] | Not established |
 
 Costs use recorded usage/configured rates, not provider invoices. Comparison allowances stay visible. [Python proof summary](backend/P82_LIVE_RESULT.md) · [Rejected fix summary](backend/P84_SECURITY_LIVE_RESULT.md). Raw live recordings are not committed. Reviewed pack: [REVIEWED_EVIDENCE_PACK_URL]; use **Open saved report** to replay it.
 
