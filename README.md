@@ -2,7 +2,7 @@
 
 **Port legacy code. Prove it works.**
 
-Demo video: [DEMO_VIDEO_URL] | Track: Indie Developer | Theme: Push the Frontier
+Demo video: https://youtu.be/-P6cKxvSha8 | Track: Indie Developer | Theme: Push the Frontier
 
 Proofport is a local Python/PHP modernization app. Muse Spark proposes translations; Docker checks syntax, golden cases and existing tests before acceptance. Python 2.7 → 3.12 and PHP 7.4 → 8.3 have verified scoped live demonstrations. The dashboard shows progress, security findings, unchanged-source hashes and HTML/JSON evidence. **Why:** rewrites can silently change division, rounding, encodings and exceptions; acceptance should depend on measured behavior.
 
