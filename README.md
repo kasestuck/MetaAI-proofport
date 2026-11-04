@@ -8,7 +8,7 @@ Proofport is a local Python/PHP modernization app. Muse Spark proposes translati
 
 ## Built during the hackathon
 
-All Proofport-owned code was written during **Oct 27–Nov 4, 2026** for the Meta Global AI Developer Hackathon; no earlier-project code was reused. We built the pipeline, Docker runner, comparator, security pass, evidence log, API Control Plane and dashboard. `samples/legacy_shop` is our own MIT Python 2 demo; `tests/fixtures/php_shop` is our own PHP demo. Team: **Proofport**, one Solo Developer / Project Creator: [PUBLIC_NAME], [GITHUB_PROFILE_URL]. Dependencies: FastAPI, Uvicorn, OpenAI SDK, python-dotenv, Pydantic, HTTPX and pytest, with pinned transitives in [backend/requirements.txt](backend/requirements.txt). Bandit 1.8.6 runs in Docker; runtime images are official Python/PHP. Frontend: plain HTML/CSS/JavaScript, no build or CDN; Node is for tests. See [third-party notices](THIRD_PARTY_NOTICES.md).
+All Proofport-owned code was written during **Oct 27–Nov 4, 2026** for the Meta Global AI Developer Hackathon; no earlier-project code was reused. We built the pipeline, Docker runner, comparator, security pass, evidence log, API Control Plane and dashboard. `samples/legacy_shop` is our own MIT Python 2 demo; `tests/fixtures/php_shop` is our own PHP demo. Team: **Proofport**, one Solo Developer. Dependencies: FastAPI, Uvicorn, OpenAI SDK, python-dotenv, Pydantic, HTTPX and pytest, with pinned transitives in [backend/requirements.txt](backend/requirements.txt). Bandit 1.8.6 runs in Docker; runtime images are official Python/PHP. Frontend: plain HTML/CSS/JavaScript, no build or CDN; Node is for tests. See [third-party notices](THIRD_PARTY_NOTICES.md).
 
 ## How it uses Meta models
 
@@ -44,7 +44,7 @@ Historical real Meta runs, **not new runs or authored fixture results**:
 | PHP `src/legacy.php`, 7.4 → 8.3 | 22/22 | 9/9 | Accepted scoped migration / $0.00612075 |
 | Python unsafe-eval proposal | 5/9 | 0/1 | Rejected, rolled back, `needs_review` / $0.013249 |
 
-Costs use recorded usage/configured rates, not provider invoices. Comparison allowances stay visible. [Python proof summary](backend/P82_LIVE_RESULT.md) · [Rejected fix summary](backend/P84_SECURITY_LIVE_RESULT.md). Raw live recordings are not committed. Reviewed pack: [REVIEWED_EVIDENCE_PACK_URL]; use **Open saved report** to replay it.
+Costs use recorded usage/configured rates, not provider invoices. Comparison allowances stay visible. [Python proof summary](backend/P82_LIVE_RESULT.md) · [Rejected fix summary](backend/P84_SECURITY_LIVE_RESULT.md).
 
 ## Quick start — Windows and VS Code
 
